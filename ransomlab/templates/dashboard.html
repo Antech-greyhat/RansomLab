@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{% if lab %}{{ lab.name }} · {% endif %}RansomLab — Incident observatory</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+</head>
+<body data-locked="{{ 'true' if locked else 'false' }}"{% if lab %} data-lab-id="{{ lab.lab_id }}" data-status-url="{{ url_for('lab_status', identifier=lab.lab_id) }}"{% endif %}>
+  <a class="skip-link" href="#main">Skip to investigation</a>
+  <aside class="sidebar" aria-label="Workspace navigation">
+    <a class="brand" href="{{ url_for('index') }}" aria-label="RansomLab home"><span class="brand-mark" aria-hidden="true">R<span>/</span></span><span>RansomLab<small>INCIDENT OBSERVATORY</small></span></a>
+    <div class="workspace-label"><span class="status-dot"></span> LOCAL WORKSPACE <span class="workspace-number">01</span></div>
+    <nav class="main-nav" aria-label="Investigation sections">
+      <a class="nav-link{% if not lab %} is-current{% endif %}" href="{{ url_for('index') }}"><span class="nav-glyph" aria-hidden="true">◫</span> Lab overview</a>
+      {% if lab %}
+      <a class="nav-link is-current" href="#main"><span class="nav-glyph" aria-hidden="true">⌁</span> Investigation</a>
+      <a class="nav-link" href="#timeline"><span class="nav-glyph" aria-hidden="true">≡</span> Event timeline</a>
+      <a class="nav-link" href="#fixtures"><span class="nav-glyph" aria-hidden="true">▤</span> File integrity</a>
+      <a class="nav-link" href="#recovery"><span class="nav-glyph" aria-hidden="true">↗</span> Recovery & evidence</a>
+      {% endif %}
+    </nav>
+    {% if not locked %}
+    <div class="sidebar-section"><h2>EXERCISES <span>{{ labs|length }}</span></h2>
+      {% for item in labs %}<a class="lab-link{% if lab and item.lab_id == lab.lab_id %} is-selected{% endif %}" data-lab-id="{{ item.lab_id }}" href="{{ url_for('lab_view', identifier=item.lab_id) }}"><span class="mini-indicator {{ item.state|tone }}"></span><span>{{ item.name }}<small>{{ item.state|label }}</small></span></a>
+      {% else %}<p class="sidebar-empty">Prepared exercises will appear here.</p>{% endfor %}
+    </div>
+    {% endif %}
+    <div class="sidebar-footer"><span class="scope-icon" aria-hidden="true">◇</span><div>Contained by design<small>Generated fixtures only</small></div><span class="footer-lock" aria-hidden="true">⌑</span></div>
+  </aside>
+
+  <div class="shell">
+    <header class="topbar"><div class="breadcrumb">WORKSPACE <span>/</span> {{ 'INVESTIGATION' if lab else 'OVERVIEW' }}</div><div class="local-badge"><span class="status-dot"></span> LOOPBACK ONLY</div></header>
+    <main id="main" tabindex="-1">
+    {% if locked %}
+      <section class="locked-state" aria-labelledby="session-title">
+        <div class="eyebrow"><span class="section-line"></span> PRIVATE LAB SESSION</div>
+        <h1 id="session-title">Open your<br><em>local session.</em></h1>
+        <p>This workspace requires the session link shown by the dashboard command. Open that link on this machine to inspect your exercises.</p>
+        <div class="session-status" id="session-status" role="status">Waiting for a local session link.</div>
+        <div class="locked-detail"><span aria-hidden="true">↳</span> Your lab data stays behind the session boundary.</div>
+      </section>
+    {% elif not lab %}
+      <section class="overview-hero" aria-labelledby="overview-title">
+        <div class="eyebrow"><span class="section-line"></span> DEFENSIVE SECURITY · CONTROLLED EXERCISES</div>
+        <div class="hero-grid"><div><h1 id="overview-title">Observe. Contain.<br><em>Recover.</em></h1><p class="hero-description">Follow the evidence from the first file change to a verified recovery. Every exercise begins with generated, disposable data.</p></div><div class="hero-annotation"><span class="annotation-index">01—04</span><div class="signal-line"></div><span>PREPARE → OBSERVE<br>INVESTIGATE → VERIFY</span></div></div>
+      </section>
+      <section class="panel exercise-panel" aria-labelledby="exercises-title"><div class="panel-heading"><div><span class="eyebrow">YOUR WORKSPACE</span><h2 id="exercises-title">Lab exercises</h2></div><span class="subtle">{{ labs|length }} registered</span></div>
+        {% if labs %}<div class="exercise-list">{% for item in labs %}<a class="exercise-row" href="{{ url_for('lab_view', identifier=item.lab_id) }}"><div class="exercise-index">{{ '%02d'|format(loop.index) }}</div><div class="exercise-name"><h3>{{ item.name }}</h3><span class="mono">{{ item.lab_id }}</span></div><span class="badge {{ item.state|tone }}">{{ item.state|label }}</span><span class="exercise-arrow" aria-hidden="true">↗</span></a>{% endfor %}</div>
+        {% else %}<div class="empty-workspace"><span class="empty-symbol" aria-hidden="true">⌗</span><div><h3>A clean starting point.</h3><p>Prepare a lab with the CLI. Your fixtures, event timeline, and recovery results will appear here.</p><code>python -m ransomlab lab create --help</code></div></div>{% endif %}
+      </section>
+      <div class="principle-strip"><div><span>01</span><h3>Generate a baseline</h3><p>Start with known files and trusted hashes.</p></div><div><span>02</span><h3>Follow the changes</h3><p>Distinguish scenario events from observations.</p></div><div><span>03</span><h3>Verify the outcome</h3><p>Recovery is complete only when the bytes match.</p></div></div>
+    {% else %}
+      <section class="investigation-header" aria-labelledby="lab-title"><div><div class="eyebrow"><span class="section-line"></span> EXERCISE / <span class="mono">{{ lab.lab_id[:8] }}</span></div><h1 id="lab-title">{{ lab.name }}</h1><p class="lab-description">An evidence-led view of your controlled exercise.</p></div><div class="investigation-actions"><span id="lab-state" class="badge large {{ lab.state|tone }}">{{ lab.state|label }}</span><a class="button secondary" href="{{ url_for('lab_report', identifier=lab.lab_id) }}">Download report <span aria-hidden="true">↗</span></a></div></section>
+      <div class="refresh-status"><span class="status-dot"></span><span id="refresh-status" role="status">Snapshot loaded · refreshes every 3 seconds</span><span class="read-only-label">READ-ONLY VIEW</span></div>
+
+      <section class="metrics" aria-label="Exercise summary">
+        <article class="metric"><div class="metric-label">REGISTERED FILES <span aria-hidden="true">▤</span></div><div class="metric-value" id="metric-files">{{ lab.fixture_count }}</div><div class="metric-foot">Generated fixture inventory</div></article>
+        <article class="metric"><div class="metric-label">BASELINE SIZE <span aria-hidden="true">⌗</span></div><div class="metric-value compact" id="metric-bytes">{{ lab.bytes_total|bytes_label }}</div><div class="metric-foot">Original plaintext</div></article>
+        <article class="metric attention"><div class="metric-label">DETECTION ALERTS <span aria-hidden="true">△</span></div><div class="metric-value" id="metric-alerts">{{ lab.alerts|length }}</div><div class="metric-foot">Correlated exercise findings</div></article>
+        <article class="metric"><div class="metric-label">RECOVERY <span aria-hidden="true">↗</span></div><div class="metric-value word" id="metric-recovery">{{ lab.recovery|recovery_state|label }}</div><div class="metric-foot">Clean-baseline verification</div></article>
+      </section>
+
+      <div class="investigation-grid"><section class="panel timeline-panel" id="timeline" aria-labelledby="timeline-title"><div class="panel-heading"><div><span class="eyebrow">CHAIN OF EVENTS</span><h2 id="timeline-title">Exercise timeline</h2></div><span class="subtle" id="event-count">{{ lab.events|length }} recent events</span></div><div class="timeline" id="event-timeline">
+        {% for event in lab.events|reverse %}{% if loop.index <= 40 %}<article class="timeline-event {{ event.severity|tone }}"><div class="timeline-track"><span class="timeline-dot"></span></div><div class="timeline-content"><div class="event-topline"><h3>{{ event.kind|label }}</h3><span class="event-sequence">#{{ event.sequence }}</span></div><p class="event-detail">{% if event.details.reason is defined %}{{ event.details.reason }}{% elif event.fixture_id %}Fixture {{ event.fixture_id[:8] }}{% else %}{{ event.outcome|label }}{% endif %}</p><div class="event-meta"><time datetime="{{ event.created_at }}">{{ event.created_at|time_label }}</time><span class="source-tag">{{ event.source }}</span><span>{{ event.outcome|label }}</span></div></div></article>{% endif %}{% else %}<div class="empty-panel"><h3>No recorded events yet.</h3><p>Committed application events will appear here.</p></div>{% endfor %}
+      </div><div class="panel-note">Latest 40 events · sequence preserves local order · times shown in UTC</div></section>
+
+      <div class="context-stack"><section class="panel" aria-labelledby="alerts-title"><div class="panel-heading"><div><span class="eyebrow">DETECTION</span><h2 id="alerts-title">Findings</h2></div><span class="small-count" id="finding-count">{{ lab.alerts|length }}</span></div><div id="alert-list" class="alert-list">{% for alert in lab.alerts %}<article class="alert-item"><span class="alert-marker {{ alert.severity|default('warning')|tone }}" aria-hidden="true">△</span><div><h3>{{ alert.rule|default(alert.kind|default('Detection finding'))|label }}</h3><p>{{ alert.reason|default(alert.message|default(alert.status|default('Review supporting events'))) }}</p></div></article>{% else %}<div class="quiet-state"><span aria-hidden="true">◇</span><h3>No detection findings</h3><p>No alerts are recorded in this snapshot. This is not proof that every change was observed.</p></div>{% endfor %}</div></section>
+      <section class="panel" aria-labelledby="machines-title"><div class="panel-heading"><div><span class="eyebrow">LAB TOPOLOGY</span><h2 id="machines-title">Declared machines</h2></div></div><div class="machine-list" id="machine-list">{% for machine in lab.machines %}<div class="machine-row"><span class="machine-icon" aria-hidden="true">▣</span><div><h3>{{ machine.name }}</h3><p>{{ machine.role }}</p></div><span class="badge {{ machine.status|tone }}">{{ machine.status|label }}</span></div>{% else %}<p class="inset subtle">No machine inventory recorded.</p>{% endfor %}</div><div class="panel-note">Inventory labels do not establish network reachability.</div></section>
+      <section class="scope-card"><div class="eyebrow">SAFETY BOUNDARY</div><h3>One exercise.<br>Known files.</h3><p>Only generated, registered fixture objects can receive simulated changes. This view cannot start or modify an exercise.</p><span class="scope-stamp">DISPOSABLE DATA / CONTROLLED EXERCISE</span></section></div></div>
+
+      <section class="panel file-panel" id="fixtures" aria-labelledby="fixtures-title"><div class="panel-heading"><div><span class="eyebrow">BASELINE VS. OBSERVED</span><h2 id="fixtures-title">File integrity</h2></div><span class="mono subtle">SHA-256</span></div><div class="table-scroll" tabindex="0" role="region" aria-labelledby="fixtures-title"><table><caption class="sr-only">Registered files and their observed integrity status</caption><thead><tr><th scope="col">Fixture</th><th scope="col">Size</th><th scope="col">Baseline digest</th><th scope="col">Observed digest</th><th scope="col">State</th></tr></thead><tbody id="fixture-rows">{% for fixture in lab.fixtures %}<tr><td><span class="file-icon" aria-hidden="true">▤</span><span>{{ fixture.name }}</span></td><td class="mono">{{ fixture.size|bytes_label }}</td><td><code title="{{ fixture.sha256 }}">{{ fixture.sha256[:16] }}…</code></td><td><code title="{{ fixture.current_sha256|default('', true) }}">{{ fixture.current_sha256[:16] ~ '…' if fixture.current_sha256 else 'Not observed' }}</code></td><td><span class="badge {{ fixture.status|tone }}">{{ fixture.status|label }}</span></td></tr>{% else %}<tr><td colspan="5" class="empty-table">No registered fixture inventory is available.</td></tr>{% endfor %}</tbody></table></div><div class="table-scroll-note">Scroll horizontally to inspect all columns.</div></section>
+
+      <section class="panel recovery-panel" id="recovery" aria-labelledby="recovery-title"><div class="recovery-emblem" aria-hidden="true">↗</div><div class="recovery-copy"><span class="eyebrow">CLOSE THE LOOP</span><h2 id="recovery-title">Recovery & evidence</h2><p id="recovery-summary">{% if lab.recovery %}Recovery status: {{ lab.recovery|recovery_state|label }}. Inspect the report for per-file verification results and evidence references.{% else %}No recovery result is recorded. Preserve the exercise evidence before restoring clean fixture copies.{% endif %}</p></div><a class="button" href="{{ url_for('lab_report', identifier=lab.lab_id) }}">View report data <span aria-hidden="true">↗</span></a></section>
+    {% endif %}
+    <footer class="page-footer"><span>RANSOMLAB <span class="footer-divider">/</span> ANTECH-GREYHAT</span><span>Learn the behaviour. Verify the defence.</span></footer>
+    </main>
+  </div>
+</body>
+</html>
