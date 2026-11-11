@@ -15,6 +15,7 @@ from pathlib import Path
 from .config import Policy
 from .errors import StateError, ValidationError
 from .events import Event, validate_id
+from .logging import LOGGER
 
 _STATE_KEY = re.compile(r"[a-z][a-z0-9_.:-]{0,127}\Z")
 _MAX_STATE_BYTES = 1_048_576
@@ -218,6 +219,7 @@ class EventStore:
             for key, value in serialized_updates:
                 db.execute("INSERT INTO state (key, json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET json=excluded.json", (key, value))
             db.commit()
+            LOGGER.info(sequenced)
             return sequenced
         except (StateError, ValidationError):
             self._rollback()

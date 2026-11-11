@@ -2,7 +2,7 @@
 
 **Deferred to Phase 11.** This inherited plan does not authorize VM configuration
 or Kali preparation during Phase 0 or other earlier phases. Consult the current
-[roadmap](../README.md#roadmap-and-contributions) before using it.
+[phase acceptance criteria](requirements.md#phase-acceptance-criteria) before using it.
 
 This is a deployment plan, not a record of deployment. The VMware product/version,
 VM allocations, guest builds, isolation rules and competition deadline remain

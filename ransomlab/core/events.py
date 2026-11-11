@@ -16,6 +16,9 @@ SEVERITIES = frozenset({"info", "warning", "high", "critical"})
 OUTCOMES = frozenset({"success", "failure", "pending", "unknown", "detected", "blocked", "requested", "partial"})
 
 _DETAILS_BY_KIND = {
+    "experiment.created": {"state", "count", "bytes", "generator"},
+    "experiment.validated": {"state", "count", "sha256"},
+    "experiment.closed": {"state", "status", "count"},
     "lab.created": {"count", "bytes", "generator", "state", "status"},
     "run.armed": {"scenario", "request_id", "count", "action_count", "state", "reason"},
     "run.started": {"scenario", "request_id", "count", "action_count", "state"},

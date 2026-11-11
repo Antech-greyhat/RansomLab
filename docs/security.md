@@ -1,8 +1,14 @@
 # Threat model and safety specification
 
-Phase 0, 2026-11-11. This is the required target contract, not a claim that every
-control is implemented or platform-validated. Current evidence is recorded in the
-[audit](phase-00-audit.md). No simulations or VM changes are performed in Phase 0.
+This is the required target contract, not a claim that every control is implemented
+or platform-validated. The [architecture](architecture.md#implemented-foundation)
+describes current configuration, lifecycle and manifest enforcement. The repository
+[audit](phase-00-audit.md) records the original baseline and platform limitations.
+
+Current closure is conservative: working data must match its baseline, active or
+uncertain work must be reconciled, and completed runs must have preserved evidence.
+Closed experiments reject all application mutations. Closing with unresolved data
+damage is not yet supported. Configuration can tighten, never relax, stored limits.
 
 ## Scope, assets and trust
 

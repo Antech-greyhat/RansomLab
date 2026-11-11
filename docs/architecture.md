@@ -1,8 +1,39 @@
 # Architecture specification
 
-Phase 0 proposal, 2026-11-11. Audited baseline:
-`d326a744e8e959401ea200c124611a3242b65dba`. No package, schema, or application
-changes are made in Phase 0. [README](../README.md) is the operating entry point.
+Architecture and implementation contracts. [README](../README.md) is the operating
+entry point. The module extraction and advanced research records below remain the
+target; the current foundation is described here.
+
+## Implemented foundation
+
+`core/config.py` loads bounded, closed TOML configuration into immutable AppConfig
+and Policy records. `core/models.py` defines immutable ExperimentRecord lifecycle
+metadata. `core/safety.py` checks signed manifest structure, inventory totals,
+object aliases and policy compatibility before a database is opened. Existing
+native SafeDirectory and LabLease controls remain the filesystem boundary.
+
+The shared LabService now creates metadata-only drafts and explicitly validates,
+inspects and closes experiments. The existing generated-data creation path uses
+the same initialization routine. New lifecycle records and their events commit
+atomically in the existing SQLite events/state schema. Old lab.created journals
+remain readable without migration; an explicit validate/close operation writes
+lifecycle metadata. Missing lifecycle data in a new journal fails closed.
+The registry reserves one creation in creation.json before allocating a workspace.
+An interrupted unregistered creation blocks further preparation for offline review;
+it cannot silently accumulate uncounted workspaces or resume itself.
+
+Draft, ready and closed are persisted metadata states; execution_state reports
+the separate existing run/recovery state. Validation revokes unused arming but
+does not authorize a run. Empty records cannot be armed. Every existing mutation
+entry point rejects a closed experiment. For this foundation, closure requires an
+intact baseline and preserved evidence for a completed run; closing with unresolved
+damage remains unsupported. Closure never deletes data.
+
+Structured stderr diagnostics emit validated events after SQLite commits, including
+their durable sequence. SQLite remains authoritative. CLI and dashboard use the
+same service/configuration factory. Packaging supplies the ransomlab entry point
+and optional dashboard dependencies; source-checkout editable installation keeps
+the managed root at `<checkout>/.ransomlab`.
 
 ## Architectural decisions
 
@@ -96,8 +127,8 @@ require a separately reviewed architecture change.
 
 ## Configuration and managed storage
 
-Keep the default root fixed at `<checkout>/.ransomlab`. Phase 1 will define a
-closed versioned TOML configuration: ceilings may only tighten, the free-space
+Keep the default root fixed at `<checkout>/.ransomlab`. Configuration uses
+closed versioned TOML: ceilings may only tighten, the free-space
 floor may rise, and unsupported fields/types are rejected. No environment or CLI
 override may redirect impact. Configuration is snapshotted and hashed into an
 experiment. Approval names the canonical root and generation; dashboard access
@@ -105,7 +136,7 @@ grants no experiment authority.
 
 ```text
 <checkout>/.ransomlab/
-  registry.key, catalog.json, lease.flag
+  registry.key, catalog.json, creation.json, lease.flag
   <generated-experiment-id>/
     manifest.json, state.db, lease.flag
     work/                         generated impact-eligible objects
@@ -167,17 +198,18 @@ findings, not lifecycle states. Proposed experiment transitions:
 | Review required | Ready | Reconcile uncertainty, preserve evidence and verify clean baseline before another run |
 | Draft / Ready / Review required | Closed | No active worker/pending intent; revoke authority, preserve available evidence and record closure outcome |
 
-Phase 1 implements metadata creation/validation/inspection/closure and rejects
-unavailable execution operations; it does not add simulation. Empty drafts may
-close without datasets. Impacted experiments may close with unresolved damage
-after reconciliation and evidence capture; closure is not verified recovery.
+The current foundation implements metadata creation/validation/inspection/closure
+alongside the existing execution services. Empty drafts may close without datasets.
+Closure currently requires an intact baseline, reconciliation of uncertain work,
+and preserved evidence for completed runs. Allowing closure with unresolved damage
+is a future extension of the proposed lifecycle, not an available operation.
 Closed experiments are read-only; repeat research in a new experiment.
 
 Run outcomes are completed, contained, failed or interrupted. Recovery attempts
 are pending, running, verified, partial or failed. Later observations can invalidate
 current verification without rewriting history. Existing prepared, armed,
-reconciliation_required, recovering and verification_lost results need explicit
-compatibility mappings in Phase 1.
+reconciliation_required, recovering and verification_lost results remain execution
+states alongside the typed experiment lifecycle; inspect exposes both explicitly.
 
 Commit an intent before each file change, then observe/verify bytes and commit a
 result. SQLite and filesystem changes are not atomic together. A missing result

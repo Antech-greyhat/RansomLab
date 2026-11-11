@@ -11,18 +11,20 @@ import hashlib
 import hmac
 import os
 from pathlib import Path
-import re
 import secrets
 import shutil
 import time
 from uuid import uuid4, uuid5, UUID
 
 from . import crypto, environment, scenarios
-from .core.config import Policy
+from .core.config import AppConfig, Policy
 from .core.errors import LabError, SafetyError, StateError, ValidationError
 from .core.events import Event, utc_now, validate_id
 from .core.hashing import hash_bytes
+from .core.logging import configure_logging
+from .core.models import ExperimentRecord, ExperimentState, validate_label
 from .core.repository import EventStore
+from .core.safety import validate_manifest
 from .storage import LabLease, SafeDirectory
 
 MAX_LABS = 8
@@ -31,9 +33,7 @@ MAGIC = b"RANSOMLAB1\x00"
 
 
 def _label(value):
-    if type(value) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{0,39}", value) is None:
-        raise ValidationError("Lab name must be 1 to 40 letters, digits, spaces, underscores or hyphens")
-    return value
+    return validate_label(value)
 
 
 def _sample(index, size):
@@ -48,11 +48,15 @@ class LabService:
     def __init__(self, root=None, policy=None):
         self.root = Path(root) if root is not None else Path(__file__).resolve().parent.parent / ".ransomlab"
         self.root = self.root.absolute()
-        self.policy = policy or Policy()
+        if policy is not None and not isinstance(policy, Policy):
+            raise ValidationError("Service requires a validated resource policy")
+        self.policy = policy if policy is not None else Policy()
 
     @classmethod
-    def default(cls):
-        return cls()
+    def default(cls, config: AppConfig | None = None):
+        config = config if config is not None else AppConfig.discover()
+        configure_logging(config.log_level)
+        return cls(policy=config.policy)
 
     def _initialize(self):
         if self.root.exists():
@@ -67,7 +71,8 @@ class LabService:
         if len(root.read("registry.key", 32)) != 32:
             raise SafetyError("The generated registry is invalid")
         catalog = scenarios.parse_json(root.read("catalog.json", 8192), 8192)
-        if type(catalog) is not dict or set(catalog) != {"schema_version", "labs"} or catalog["schema_version"] != 1:
+        if (type(catalog) is not dict or set(catalog) != {"schema_version", "labs"}
+                or type(catalog["schema_version"]) is not int or catalog["schema_version"] != 1):
             raise SafetyError("The generated registry is invalid")
         if type(catalog["labs"]) is not list or len(catalog["labs"]) > MAX_LABS:
             raise SafetyError("The generated registry exceeds its bounds")
@@ -88,20 +93,10 @@ class LabService:
         expected = hmac.new(registry.read("registry.key", 32), scenarios.canonical(signed["manifest"]), hashlib.sha256).hexdigest()
         if type(signed["mac"]) is not str or not hmac.compare_digest(signed["mac"], expected):
             raise SafetyError("Fixture manifest does not match the local registry")
-        manifest = signed["manifest"]
-        validate_id(manifest["lab_id"])
-        validate_id(manifest["baseline_id"])
-        Policy.from_dict(manifest["policy"])
-        if not 1 <= len(manifest["fixtures"]) <= self.policy.max_files:
-            raise SafetyError("Fixture manifest exceeds its bounds")
-        for fixture in manifest["fixtures"]:
-            validate_id(fixture["id"])
-            if fixture["name"] != f"fixture-{fixture['id']}.bin":
-                raise SafetyError("Fixture name is not generated from its identity")
-        return manifest
+        return validate_manifest(signed["manifest"], self.policy)
 
     @contextmanager
-    def _open(self, lab_id, *, readonly=False, lease=False):
+    def _open(self, lab_id, *, readonly=False, lease=False, allow_closed=False):
         validate_id(lab_id)
         if not self.root.exists():
             raise StateError("No generated lab registry exists")
@@ -121,11 +116,41 @@ class LabService:
                     raise StateError("An existing SQLite sidecar requires offline journal review before this lab can open")
             stack.enter_context(directory.pin("state.db"))
             store = stack.enter_context(EventStore(path / "state.db", readonly=readonly, policy=self.policy))
+            record = self._experiment_record(lab, store)
+            if not readonly and not allow_closed and record.state == ExperimentState.CLOSED:
+                raise StateError("Closed experiments are read-only")
             yield lab, store, path
+
+    @staticmethod
+    def _experiment_record(lab, store) -> ExperimentRecord:
+        digest = hash_bytes(scenarios.canonical(lab))
+        raw = store.get_state("experiment")
+        if raw is None:
+            # Reading legacy journals does not migrate their lifecycle metadata.
+            after = 0
+            while True:
+                events = store.events(limit=1000, after=after)
+                if any(event.kind.startswith("experiment.") for event in events):
+                    raise StateError("Experiment lifecycle metadata is missing")
+                if not events:
+                    break
+                after = events[-1].sequence
+            if lab["generator"] != "fixture-v1":
+                raise StateError("Experiment lifecycle metadata is missing")
+            return ExperimentRecord(lab["lab_id"], lab["baseline_id"], digest,
+                                    ExperimentState.READY, validated_at=lab["created_at"])
+        try:
+            record = ExperimentRecord.from_dict(raw)
+        except ValidationError:
+            raise StateError("Stored experiment lifecycle failed validation") from None
+        if (record.experiment_id != lab["lab_id"] or record.baseline_id != lab["baseline_id"]
+                or record.manifest_sha256 != digest):
+            raise SafetyError("Experiment lifecycle belongs to a different generated inventory")
+        return record
 
     def _event(self, store, lab, kind, *, updates=None, expected=None, **values):
         protected = {"file.intent", "file.changed", "file.restored", "run.completed", "run.contained", "run.interrupted",
-                     "recovery.started", "recovery.verified", "recovery.failed", "evidence.started", "evidence.preserved", "containment.requested"}
+                     "recovery.started", "recovery.verified", "recovery.failed", "evidence.started", "evidence.preserved", "containment.requested", "experiment.closed"}
         reserve = len(lab["fixtures"]) * 3 + 16
         if kind not in protected and store.count() + reserve + 1 > self.policy.max_events:
             raise StateError("Audit capacity is reserved for containment, evidence and recovery")
@@ -137,13 +162,34 @@ class LabService:
             raise ValidationError("Fixture count exceeds the training ceiling")
         if type(size) is not int or not 64 <= size <= self.policy.max_file_bytes or size * count > self.policy.max_total_bytes:
             raise ValidationError("Fixture bytes exceed the training ceiling")
+        return self._create(name, count, size)
+
+    def create_experiment(self, name: str = "Research experiment") -> dict:
+        """Create an owned metadata-only draft without running a scenario."""
+        _label(name)
+        created = self._create(name, 0, 0)
+        return self.inspect_experiment(created["lab_id"])
+
+    def _create(self, name, count, size):
         self._initialize()
         self._space(size * count * 3 + self.policy.max_evidence_bytes + self.policy.max_database_bytes)
         with LabLease(self.root / "lease.flag"), SafeDirectory(self.root) as registry:
             catalog = self._catalog(registry)
+            if registry.exists("creation.json"):
+                pending = scenarios.parse_json(registry.read("creation.json", 128), 128)
+                if type(pending) is not dict or set(pending) != {"lab_id"}:
+                    raise SafetyError("Experiment creation reservation is invalid")
+                validate_id(pending["lab_id"])
+                if pending["lab_id"] not in catalog["labs"]:
+                    raise StateError("Interrupted experiment preparation requires offline review")
             if len(catalog["labs"]) >= MAX_LABS:
                 raise SafetyError("The maximum number of disposable labs has been reached")
             lab_id = str(uuid4())
+            reservation = scenarios.canonical({"lab_id": lab_id})
+            if registry.exists("creation.json"):
+                registry.replace("creation.json", reservation, expected=registry.identity("creation.json"))
+            else:
+                registry.create("creation.json", reservation)
             path = self.root / lab_id
             with ExitStack() as stack:
                 directory = stack.enter_context(SafeDirectory(path, create=True))
@@ -164,14 +210,19 @@ class LabService:
                     fixtures.append({"id": fixture_id, "name": filename, "size": size, "sha256": digest,
                                      "identity": identity, "clean_identity": clean_identity, "sample_index": index})
                 lab = {"schema_version": 1, "lab_id": lab_id, "baseline_id": str(uuid4()), "name": name,
-                       "created_at": utc_now(), "generator": "fixture-v1", "fixtures": fixtures,
+                       "created_at": utc_now(), "generator": "fixture-v1" if count else "empty-v1", "fixtures": fixtures,
                        "policy": self.policy.to_dict(), "fixture_count": count, "bytes_total": count * size}
+                validate_manifest(lab, self.policy)
+                record = ExperimentRecord(lab_id, lab["baseline_id"], hash_bytes(scenarios.canonical(lab)),
+                                          ExperimentState.READY if count else ExperimentState.DRAFT,
+                                          validated_at=lab["created_at"] if count else None)
                 mac = hmac.new(registry.read("registry.key", 32), scenarios.canonical(lab), hashlib.sha256).hexdigest()
                 directory.create("manifest.json", scenarios.canonical({"manifest": lab, "mac": mac}))
                 with EventStore(path / "state.db", policy=self.policy) as store:
-                    self._event(store, lab, "lab.created", details={"count": count, "bytes": count * size, "generator": "fixture-v1", "state": "prepared"},
+                    self._event(store, lab, "experiment.created", details={"count": count, "bytes": count * size, "generator": lab["generator"], "state": record.state.value},
                                 updates={"requests": [], "runs": [], "alerts": [], "evidence": [], "recovery": None,
-                                         "arm": None, "pending": None, "active_run": None, "stop_requested": False})
+                                         "arm": None, "pending": None, "active_run": None, "stop_requested": False,
+                                         "experiment": record.to_dict()})
                 catalog["labs"].append(lab_id)
                 registry.replace("catalog.json", scenarios.canonical(catalog), expected=registry.identity("catalog.json"))
         return self.status(lab_id)
@@ -188,7 +239,7 @@ class LabService:
                 run = store.get_state("run:" + run_id) if run_id else None
                 recovery = store.get_state("recovery")
                 state = self._state(store, run, recovery)
-                if recovery and recovery.get("verified") and any(item["status"] != "intact" for item in self._snapshot(lab, path)):
+                if state != "closed" and recovery and recovery.get("verified") and any(item["status"] != "intact" for item in self._snapshot(lab, path)):
                     state = "verification_lost"
                 result.append({"lab_id": lab_id, "name": lab["name"], "fixture_count": lab["fixture_count"],
                                "bytes_total": lab["bytes_total"], "created_at": lab["created_at"],
@@ -197,6 +248,9 @@ class LabService:
 
     @staticmethod
     def _state(store, run, recovery):
+        record = store.get_state("experiment")
+        if record and record["state"] in {"closed", "draft"}:
+            return record["state"]
         if store.get_state("pending"):
             return "reconciliation_required"
         if store.get_state("arm"):
@@ -237,6 +291,7 @@ class LabService:
             total = store.count()
             result = {"schema_version": 1, "lab_id": lab_id, "name": lab["name"], "created_at": lab["created_at"],
                     "state": self._state(store, run, recovery), "fixture_count": lab["fixture_count"], "bytes_total": lab["bytes_total"],
+                    "experiment": self._experiment_record(lab, store).to_dict(),
                     "last_run": run, "recovery": recovery, "alerts": store.get_state("alerts", []),
                     "events": [event.to_dict() for event in store.events(limit=200, after=max(0, total - 200))],
                     "event_count": total, "fixtures": self._snapshot(lab, path),
@@ -250,8 +305,58 @@ class LabService:
                 result["recovery"] = {**recovery, "historical_verified": bool(recovery.get("verified")), "verified": current_verified}
                 if recovery.get("verified") and not current_verified:
                     result["recovery"]["state"] = "verification_lost"
-                    result["state"] = "verification_lost"
+                    if result["state"] != "closed":
+                        result["state"] = "verification_lost"
             return result
+
+    def inspect_experiment(self, experiment_id: str) -> dict:
+        snapshot = self.status(experiment_id)
+        return {**snapshot["experiment"], "name": snapshot["name"], "created_at": snapshot["created_at"],
+                "execution_state": snapshot["state"], "fixture_count": snapshot["fixture_count"],
+                "bytes_total": snapshot["bytes_total"], "event_count": snapshot["event_count"]}
+
+    def list_experiments(self) -> list[dict]:
+        return [self.inspect_experiment(item["lab_id"]) for item in self.list_labs()]
+
+    @staticmethod
+    def _require_idle(store) -> None:
+        run_id = store.get_state("active_run")
+        run = store.get_state("run:" + run_id) if run_id else None
+        recovery = store.get_state("recovery")
+        if (store.get_state("pending") or run and run["state"] == "running"
+                or recovery and recovery.get("state") == "recovering"):
+            raise StateError("Contain or reconcile active work before changing the experiment lifecycle")
+
+    def validate_experiment(self, experiment_id: str) -> dict:
+        with self._open(experiment_id, lease=True) as (lab, store, path):
+            self._require_idle(store)
+            self._verify_baseline(lab, path)
+            record = self._experiment_record(lab, store).validate()
+            self._event(store, lab, "experiment.validated", source="operator",
+                        details={"state": record.state.value, "count": len(lab["fixtures"]), "sha256": record.manifest_sha256},
+                        updates={"experiment": record.to_dict(), "arm": None},
+                        expected={"experiment": store.get_state("experiment"), "arm": store.get_state("arm")})
+        return self.inspect_experiment(experiment_id)
+
+    def close_experiment(self, experiment_id: str) -> dict:
+        with self._open(experiment_id, lease=True, allow_closed=True) as (lab, store, path):
+            record = self._experiment_record(lab, store)
+            if record.state != ExperimentState.CLOSED:
+                self._require_idle(store)
+                # Keep closure conservative: damage must be recovered before freezing history.
+                self._verify_baseline(lab, path)
+                run_id = store.get_state("active_run")
+                if run_id:
+                    evidence = [item for item in store.get_state("evidence", []) if item["run_id"] == run_id and item["state"] == "complete"]
+                    if not evidence:
+                        raise StateError("Preserve evidence before closing a completed run")
+                    self._verify_evidence(path, evidence[-1])
+                closed = record.close()
+                self._event(store, lab, "experiment.closed", source="operator",
+                            details={"state": "closed", "status": "baseline_verified", "count": len(lab["fixtures"])},
+                            updates={"experiment": closed.to_dict(), "arm": None, "stop_requested": True},
+                            expected={"experiment": store.get_state("experiment"), "arm": store.get_state("arm")})
+        return self.inspect_experiment(experiment_id)
 
     def descriptor(self, lab_id):
         with self._open(lab_id, readonly=True) as (lab, _, __):
@@ -295,6 +400,9 @@ class LabService:
             return {"lab_id": lab_id, "state": "armed", "expires_at": arm["expires_at"]}
 
     def _ready(self, lab, store, path):
+        record = self._experiment_record(lab, store)
+        if record.state != ExperimentState.READY or not lab["fixtures"]:
+            raise StateError("A validated experiment with generated fixtures is required")
         if store.get_state("pending"):
             raise StateError("An uncertain operation requires reconciliation")
         run_id = store.get_state("active_run")
@@ -302,10 +410,15 @@ class LabService:
             recovery = store.get_state("recovery")
             if not recovery or not recovery.get("verified") or recovery.get("run_id") != run_id:
                 raise StateError("The previous run must be recovered and verified first")
+        self._verify_baseline(lab, path)
+
+    def _verify_baseline(self, lab, path):
         self._space(self.policy.max_total_bytes * 2)
         if any(item["status"] != "intact" for item in self._snapshot(lab, path)):
             raise SafetyError("Working fixtures do not match their generated baseline")
         with SafeDirectory(path / "clean") as clean:
+            if set(clean.names()) != {fixture["name"] for fixture in lab["fixtures"]}:
+                raise SafetyError("Clean-copy inventory differs from the generated baseline")
             for fixture in lab["fixtures"]:
                 if clean.identity(fixture["name"]) != fixture["clean_identity"] or hash_bytes(clean.read(fixture["name"], fixture["size"])) != fixture["sha256"]:
                     raise SafetyError("A clean recovery copy failed verification")

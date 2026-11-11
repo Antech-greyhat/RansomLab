@@ -1,0 +1,11 @@
+schema_version = 1
+
+[policy]
+max_files = 50
+max_file_bytes = 1048576
+max_total_bytes = 10485760
+max_actions = 50
+max_run_seconds = 120
+
+[logging]
+level = "INFO"

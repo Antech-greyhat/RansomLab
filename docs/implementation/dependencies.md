@@ -1,5 +1,23 @@
 # Technology decisions and dependency inventory
 
+## Foundation packaging
+
+`pyproject.toml` defines the antech-ransomlab distribution, Python 3.13–3.14,
+the ransomlab console entry point and included dashboard resources. Core runtime
+dependencies remain standard-library only. The optional dashboard extra uses the
+existing Flask 3.1.3 and Uvicorn 0.41.0 pins with constraints-dashboard.txt.
+
+Setuptools 84.2.1 is the pinned build backend. It was identified through PyPI's
+official index and installed only into the checkout's .venv to verify editable
+installation and wheel building. Installed metadata declares MIT and Python >=3.10.
+No system packages, crypto provider or VMware settings were changed. This build
+verification is not a complete current advisory or supply-chain audit.
+
+The test workflow uses official checkout/setup-python actions pinned to the commit
+IDs returned by their v4/v5 tag references, with read-only repository permissions
+and persisted credentials disabled. CI installs only the package and existing
+dashboard dependencies and runs synthetic tests; it does not run VM scenarios.
+
 ## Phase 0 decisions — 2026-11-11
 
 These are recommendations for the reviewed phase plan, not dependency changes.
