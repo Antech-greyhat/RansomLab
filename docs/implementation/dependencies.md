@@ -1,6 +1,38 @@
-# Dependency and implementation decisions
+# Technology decisions and dependency inventory
 
-Recorded 2026-11-04. No package, browser or runtime installation occurred. The owner's cross-phase implementation authorization permits use of the existing development environment; it is not a verified-source installation manifest for a fresh guest.
+## Phase 0 decisions — 2026-11-11
+
+These are recommendations for the reviewed phase plan, not dependency changes.
+No package, runtime or browser was installed in Phase 0. Preserve existing working
+providers until their relevant phase has tested a replacement. The new
+[architecture](../architecture.md) supersedes earlier cross-phase authorization.
+
+| Concern | Decision and justification | Alternatives / implementation phase |
+| --- | --- | --- |
+| Runtime | Propose Python 3.13–3.14; audit uses 3.14.3. Test each supported platform before claiming compatibility | No downgrade/install now; packaging and matrix begin Phase 1 |
+| Models/configuration | Standard-library dataclasses, enums, strict versioned JSON, tomllib for proposed TOML configuration | Pydantic adds a dependency without a demonstrated validation need; Phase 1 |
+| Persistence | Keep sqlite3, transactions, bounded records and explicit migrations | SQLAlchemy, Postgres and external brokers add lifecycle/deployment overhead for one local operator; Phase 1 |
+| CLI | Keep argparse and structured errors | Click/Typer provide conveniences but no necessary new capability; Phase 8 completes existing interface |
+| Dashboard | Keep Flask/Jinja and existing small JavaScript/CSS assets | Streamlit is quick for analysis but less suited to the existing bounded read-only routes; FastAPI adds an unnecessary ASGI/API rewrite; no React |
+| HTTP server | Recommend maintained Waitress for dedicated cross-platform WSGI serving; retain all request/Host/Origin/auth limits | Existing Uvicorn WSGI adapter is deprecated. Review Waitress limits/versions and rerun server tests in Phase 8 before switching |
+| Cryptography | Recommend established cryptography package for portable AES-GCM, RSA-OAEP key-wrap and Ed25519 signature demonstrations | Existing Windows CNG is established crypto but ctypes raises ABI/maintenance cost; preserve vectors/provider until Phase 2 review; no invented algorithms |
+| Integrity/telemetry | hashlib and bounded polling plus scoped operation observations first | watchdog native notifications may help latency but add platform/loss semantics; add only if justified by Phase 4 measurements |
+| Tests | Retain unittest and current structured runner | pytest/Hypothesis may help later generative tests; not necessary for Phase 0 |
+| Reports | Standard-library JSON/JSONL and generated Markdown over common records | No pandas, plotting framework or separate frontend needed for basic measured results |
+| Startup | Bash orchestrates shared Python preflight/entry points in Phase 8 | No Bash duplication of safety logic, implicit downloads or system configuration; Windows-specific diagnostics may remain PowerShell |
+
+Runtime dependencies should be minimal and separated from an optional dashboard
+extra in Phase 1 packaging. Add crypto dependencies only with Phase 2 work. A
+reviewed platform lock must include transitive versions, sources, artifact hashes,
+license notices and dated advisory findings; do not invent exact future pins here.
+Online advisory/provenance assessment and clean installation remain outstanding.
+
+## Historical implementation inventory — 2026-11-04
+
+The following records describe the inherited build, not the new target's approval
+or a verified-source installation manifest. Its observed Python/SQLite and direct
+Flask/Uvicorn versions were corroborated by Phase 0 diagnostics; original package
+provenance and full transitive inventory were not independently re-established.
 
 ## Implemented choices
 
@@ -35,6 +67,6 @@ Browser QA reused installed Playwright Core 1.56.1 and cached Chromium revision 
 
 ## Resource policy
 
-The reviewed initial ceiling profile is implemented with explicit storage limits: 100 files, 1 MiB per file, 20 MiB plaintext, 100 actions, 300 seconds between bounded-operation checks, 8 KiB per event, 10,000 events, 32 MiB database, 64 MiB evidence and a 128 MiB free-space reserve. At most eight labs and twenty staged requests/runs are allowed per lab. Internal policy may tighten limits; the CLI cannot enlarge them.
+The reviewed initial ceiling profile is implemented with explicit storage limits: 100 files, 1 MiB per file, 20 MiB plaintext, 100 actions, a 300-second run budget checked between bounded operations, 8 KiB per event, 10,000 events, 32 MiB database, 64 MiB evidence and a 128 MiB free-space reserve. At most eight labs and twenty staged requests/runs are allowed per lab. Internal policy may tighten limits; the CLI cannot enlarge them.
 
 Nonessential events cannot spend the protected recovery audit reserve. Evidence attempts reserve bytes before copying; incomplete attempts still count. File and database writes remain separate transactions, with pending-intent reconciliation handling uncertainty. Kernel I/O completion and physical disk exhaustion are not proven hard-real-time guarantees.

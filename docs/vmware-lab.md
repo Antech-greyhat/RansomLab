@@ -1,5 +1,9 @@
 # VMware home-lab runbook
 
+**Deferred to Phase 11.** This inherited plan does not authorize VM configuration
+or Kali preparation during Phase 0 or other earlier phases. Consult the current
+[roadmap](../README.md#roadmap-and-contributions) before using it.
+
 This is a deployment plan, not a record of deployment. The VMware product/version,
 VM allocations, guest builds, isolation rules and competition deadline remain
 unknown. Do not fill those fields with assumed facts or mark the lab validated
@@ -16,7 +20,7 @@ because its manufacturer string contains VMware.
 | CPU, RAM, local disk and filesystem per guest | Pending |
 | Isolated virtual network type/name and attached adapters | Pending |
 | Snapshot labels and restore procedure | Pending |
-| Reviewed source revision/artifact identification | Pending; no commits were authorized for this build |
+| Reviewed source revision/artifact identification | Record the reviewed release revision at deployment; Phase 0 baseline is d326a74 |
 | Challenge rules, demo duration and date | Pending |
 
 Windows 11 hosts generated fixtures and defence/response services. Kali composes

@@ -1,106 +1,256 @@
-# System architecture
+# Architecture specification
 
-RansomLab is a modular Python application. The CLI and read-only Flask dashboard call the same services and use the same event and repository contracts. Kali exchanges bounded JSON documents with the Windows operator; there is no remote execution service or network receiver.
+Phase 0 proposal, 2026-11-11. Audited baseline:
+`d326a744e8e959401ea200c124611a3242b65dba`. No package, schema, or application
+changes are made in Phase 0. [README](../README.md) is the operating entry point.
 
-## Components
+## Architectural decisions
 
-| Component | Responsibility |
-| --- | --- |
-| `core/config.py`, `core/errors.py` | Immutable resource limits and explicit validation/state/safety errors |
-| `core/events.py`, `core/hashing.py` | Closed, versioned event records and bounded SHA-256 primitives |
-| `core/repository.py` | Local SQLite authority; event/metadata transactions and conditional control-state updates |
-| `storage.py` | Checked generated-object access, ancestor/alias checks and cross-process mutation leases |
-| `crypto.py` | Byte-only AES-256-GCM provider adapter; Windows uses Microsoft CNG |
-| `scenarios.py` | Bounded descriptors and fixed-action envelopes; strict schema, expiry and generation validation |
-| `environment.py` | VMware guest indicator, non-elevated identity and operator attestation checks |
-| `services.py` | Preparation, scenario execution, observations, alerts, containment, evidence, recovery and reporting |
-| `cli.py`, `__main__.py` | Argument parsing, shared-service calls, structured results and exit codes |
-| `dashboard.py`, `server.py`, templates/static assets | Authenticated loopback views and bounded HTTP handling without impact controls |
+Use a modular Python application with one shared service layer, SQLite authority,
+and thin CLI and Flask adapters. Retain `ransomlab` as the import/command name and
+RansomLab as the repository name; Antech-RansomLab is the product name. Avoid a
+framework rewrite, distributed workers, external brokers, React, or a separate
+frontend build: these add complexity without helping one local research operator.
 
-```mermaid
-flowchart TD
-    CLI[CLI] --> SERVICES[Shared application services]
-    WEB[Read-only Flask views] --> SERVICES
-    IMPORT[Validated local scenario import] --> SERVICES
-    SERVICES --> POLICY[Models and resource policy]
-    SERVICES --> STORAGE[Guarded fixture access]
-    SERVICES --> CRYPTO[Authenticated byte encryption]
-    SERVICES --> EVENTS[SQLite events and state]
-    EVENTS --> REPORT[Structured reports and timeline exports]
+Preserve useful `Policy`, `Event`, `EventStore`, `SafeDirectory`, `LabLease`,
+cryptographic vectors, and interface contracts. Incrementally extract the broad
+`LabService` into cohesive services while retaining a compatibility facade.
+Existing later-phase code is subject to its corresponding new phase's acceptance.
+
+Choose standard-library dataclasses/enums, strict JSON validation, `argparse`,
+`sqlite3`, `hashlib`, `logging`, `tomllib`, and `unittest`. Retain Flask/Jinja.
+Recommend `cryptography` for portable research and Waitress for dedicated WSGI
+serving in later phases; preserve current CNG/Uvicorn until tested replacements
+are reviewed. Exact versions, artifacts, licenses, and advisories must be reviewed
+at installation time. See [technology decisions](implementation/dependencies.md).
+
+## Module boundaries
+
+This is a proposed tree, not the current layout. Move one coherent capability
+in its own phase rather than creating empty placeholder packages.
+
+```text
+ransomlab/
+  core/          configuration, models, lifecycle, safety, errors, events
+  storage/       guarded filesystem adapters, SQLite repositories, migrations
+  crypto/        byte-only crypto, hashes, signatures, measurements
+  simulation/    scenarios, synthetic generation, staging, local mock sink
+  telemetry/     baseline snapshots, file observations, adapter health
+  detection/     bounded rules, windows, correlation, alerts
+  forensics/     evidence manifests, verification, investigation timelines
+  recovery/      clean-copy custody, restoration, verification
+  reporting/     evaluation, comparison, JSON/JSONL and Markdown
+  services.py    compatibility facade and service composition
+  cli.py         parsing and shared-service dispatch
+  dashboard.py   read-only shared-service views
+  server.py      authenticated bounded loopback serving
+  templates/     server-rendered HTML
+  static/        existing CSS/JavaScript, no build pipeline
+scripts/         Python validation and Bash startup/preparation
+tests/           unit, integration, boundary, failure and platform checks
 ```
 
-## Data flow and trust boundaries
+| Interface | Contract and permitted access |
+| --- | --- |
+| ExperimentService | Create, validate, authorize, inspect and close; owns transactional transitions |
+| ExperimentRepository / EventRepository | Versioned records, conditional updates, append-only application journal; no impact decisions |
+| WorkspaceGuard | Scoped capabilities after ownership, identity, path and quota checks; no arbitrary target roots |
+| ScenarioRunner | Fixed steps, generated IDs, admission checks and intent/results; work/staging/mock capabilities only |
+| CryptoProvider | Bounded bytes in/out; no filesystem, URL, command or directory arguments |
+| TelemetryService | Actual observations, identity and health; cannot infer success from simulator intent |
+| DetectionService | Versioned rules over telemetry; alerts cite event IDs; no evaluator labels |
+| EvidenceService | Approved artifact reads, bounded preservation and manifest verification |
+| RecoveryService | Verified clean-source reads; restoration only to baseline names/identities through the guard |
+| ReportService | Shared stored queries, provenance, evaluation and completeness; no illustrative results |
+
+These are logical contracts, not newly implemented APIs. Explicit dependency
+injection permits memory tests without a production bypass switch.
+
+## Data and trust flow
 
 ```mermaid
 flowchart LR
-    subgraph KALI[Kali analysis workstation]
-        COMPOSE[Compose fixed-action JSON]
-        ANALYSE[Review synthetic exports]
-    end
-    subgraph TRANSFER[Operator-controlled offline transfer]
-        DESCRIPTOR[Generated IDs only]
-        ENVELOPE[Bounded scenario envelope]
-        EXPORT[Reviewed reports and evidence]
-    end
-    subgraph WINDOWS[Disposable Windows guest]
-        OPERATOR[Local operator]
-        CORE[Shared services and policy]
-        WORK[Generated working fixtures]
-        CLEAN[Clean copies and baseline]
-        JOURNAL[Local event journal]
-        EVIDENCE[Preserved evidence]
-        DASH[Loopback dashboard]
-        OPERATOR -->|Import and arm| CORE
-        CORE -->|Scoped impact| WORK
-        WORK -->|Hashes and observations| CORE
-        CLEAN -->|Verified recovery source| CORE
-        CORE --> JOURNAL
-        CORE --> EVIDENCE
-        JOURNAL --> DASH
-        CORE --> DESCRIPTOR
-        EVIDENCE --> EXPORT
-    end
-    DESCRIPTOR --> COMPOSE
-    COMPOSE --> ENVELOPE
-    ENVELOPE --> CORE
-    EXPORT --> ANALYSE
+    OP[Local operator] --> API[CLI and read-only dashboard]
+    API --> APP[Application services]
+    APP --> GUARD[Ownership, authorization, identity and quota guards]
+    GUARD --> WORK[Generated working dataset]
+    GUARD --> STAGE[Generated staging area]
+    STAGE --> SINK[Filesystem-only mock destination]
+    WORK --> OBS[Observed file activity]
+    STAGE --> OBS
+    SINK --> OBS
+    OBS --> RULES[Detection rules]
+    RULES --> JOURNAL[SQLite events and records]
+    APP --> JOURNAL
+    JOURNAL --> REPORT[Evidence, metrics and reports]
+    CLEAN[Protected clean copies] --> REC[Recovery service]
+    REC --> GUARD
 ```
 
-The diagram specifies logical transfers, not a shared-folder or network configuration. Configure isolation, snapshots and the transfer procedure using the [VMware runbook](vmware-lab.md). Declared machine roles are not live network status.
+The mock destination is a registered compartment under the same experiment,
+accessed through an internal copy-and-receipt interface. It has no socket,
+configurable URL, bind address, redirect, proxy, or upload handler. Observations
+report actual bounded writes and receiver hash checks. These study local
+staging/transfer patterns, not packet-level egress detection. Networking would
+require a separately reviewed architecture change.
 
-## Managed storage
+## Configuration and managed storage
+
+Keep the default root fixed at `<checkout>/.ransomlab`. Phase 1 will define a
+closed versioned TOML configuration: ceilings may only tighten, the free-space
+floor may rise, and unsupported fields/types are rejected. No environment or CLI
+override may redirect impact. Configuration is snapshotted and hashed into an
+experiment. Approval names the canonical root and generation; dashboard access
+grants no experiment authority.
 
 ```text
 <checkout>/.ransomlab/
-  registry.key
-  catalog.json
-  lease.flag
-  <generated-lab-id>/
-    manifest.json
-    state.db
-    lease.flag
-    work/
-    clean/
-    keys/
-    evidence/<generated-evidence-id>/
+  registry.key, catalog.json, lease.flag
+  <generated-experiment-id>/
+    manifest.json, state.db, lease.flag
+    work/                         generated impact-eligible objects
+    clean/                        no scenario write capability
+    keys/                         per-run secrets, never exported
+    staging/<generated-run-id>/    proposed generated copies
+    mock/<generated-run-id>/       proposed local receipts and copies
+    evidence/<generated-id>/       preserved synthetic artifacts
 ```
 
-The public CLI has no arbitrary root option. Fixture names derive from generated identifiers, and a local HMAC binds the manifest to registry key material. Only registered working objects are simulation targets. Recovery copies, keys, evidence and database files are separate from that inventory. A marker file or string-prefix check does not grant access.
+New compartments must be explicitly registered. Do not relax the existing rejection
+of unexpected working objects to permit arbitrary notes, staging files, or renames.
+Plan their names/IDs and budgets before authorization. Recovery, evidence, and
+backup paths are never simulation targets. Startup and closure do not delete data.
 
-Windows access currently requires local NTFS and retained ancestor/object handles. The Linux adapter uses descriptor-relative access with documented same-account race limitations. These are application and OS controls with specific assumptions, not a sandbox against a malicious administrator. See [filesystem details](implementation/filesystem-boundary.md).
+The guard checks ancestors and final handles, rejects aliases/links, validates
+regular-file ownership/identity, and enforces operation-time bounds. Normalization
+alone is insufficient. Platform limits are in the [safety model](security.md) and
+[existing adapter review](implementation/filesystem-boundary.md).
 
-## Lifecycle and durability
+## Proposed data contracts
 
-Preparation creates and verifies the fixture inventory. Arming is local, expiring and single-use. Import only stages a request; duplicate delivery cannot repeat consumed actions. One mutation lease coordinates simulation, observation updates, preservation and recovery. Containment can signal the active coordinator without taking that lease.
+Records have strict fields/types, a schema version and bounded serialization.
+IDs are canonical UUIDs, foreign records must match the experiment/generation,
+and content digests are SHA-256. Labels are not paths. Use UTC plus monotonic
+durations scoped to one process epoch; journal sequences establish local order.
 
-A committed operation intent precedes every working-fixture change; the result follows verification. SQLite and file changes are separate transactions, so an incomplete intent represents uncertainty until explicit reconciliation. Startup never resumes a simulation automatically. Existing SQLite sidecars trigger a stop for offline journal review.
+| Record | Required fields beyond schema version | Invariants |
+| --- | --- | --- |
+| Experiment | ID, label, created/closed times, lifecycle state/revision, workspace identity, policy snapshot/hash, generator version/seed, baseline ID, source revision | Registered owner; conditional revisions; incomplete preparation cannot run |
+| Dataset entry | Fixture ID, generation, generated relative name, class, canary flag, size, baseline digest, work/clean identities | Synthetic provenance, unique names/IDs, bounded total inventory |
+| Authorization | ID, experiment/baseline IDs, scenario version/config hash, policy hash, issued/expiry times, operator assertions, consumed/revoked state | Single-use; finite lifetime; consumed atomically at admission; changed inputs invalidate |
+| Run | ID, experiment ID, request/authorization IDs, scenario/config, state/revision, start/end, process epoch, intended/admitted/completed counts | One mutator; retries return prior results without repeating impact |
+| Event | ID, experiment/run/object IDs, sequence, kind/source/severity/outcome, occurred/observed/recorded times, typed details | Distinguish simulator, observer, detector and response; no secrets or raw payloads |
+| Observation | Event ID, sensor/version, operation, object identity, before/after size/hash, confidence, health/loss context | Actual observation; unsupported access/rename inference marked unknown |
+| Alert | ID, rule/version/config hash, severity, input event IDs, correlation ID, detection time, disposition | Deduplicated and attributable; disposition does not overwrite observation |
+| Evidence bundle | ID, run, source revision, capture time, event cutoff, manifest digest, artifact entries, completeness/failures | Hashes/sizes and generated names; no keys; missing artifacts explicit |
+| Recovery attempt | ID, baseline/evidence IDs, mode, per-file outcomes, start/end, verified/missing/corrupt counts | Current full-inventory verification independent of historical success |
+| Evaluation/report | ID, runs, rule/scenario versions, unit/window, labels, TP/FP/FN/TN, unavailable reasons, coverage/recovery | Labels isolated from detector inputs; denominators and missing evidence retained |
 
-Evidence attempts reserve storage durably before copying, including failed attempts. Recovery requires preserved evidence and verified clean sources. Success is based on the complete current baseline comparison, separately from historical recovery results. Missing fixture objects can produce partial evidence but are not recreated by the present recovery service.
+The existing v1 Event uses `lab_id`, `created_at`, and a smaller source/kind
+vocabulary; manifests and run metadata are dictionaries. Preserve v1 records
+through explicit legacy adapters. Do not silently reinterpret IDs or overwrite
+stored v1 JSON with new fields.
 
-## Events, reporting and interface limits
+## Lifecycle and interruption semantics
 
-Event sequences order one lab journal. UTC timestamps aid presentation without claiming cross-machine causal order. Simulator actions, file observations and response actions have separate sources; incident and run identifiers link the records. SQLite remains authoritative; JSON, JSONL and Markdown are derivative outputs.
+Separate experiment lifecycle, execution outcome and recovery state. Alerts are
+findings, not lifecycle states. Proposed experiment transitions:
 
-The dashboard binds to loopback and exchanges a private launch token for a signed local session. Host/origin checks, escaping, request limits and read-only application routes constrain browser access. It delegates all lab queries to shared services and exposes no host administration or file-impact controls.
+| From | To | Admission requirement |
+| --- | --- | --- |
+| Absent | Draft | Create only new owned metadata/workspace; register after durable initialization |
+| Draft | Ready | Validate ownership, policy, schema and required artifacts; once a dataset exists, verify baseline and clean copies |
+| Ready | Authorized | Operator consent binds scenario, inventory, policy and finite budget |
+| Authorized | Ready | Expiry, cancellation or changed input revokes unused authority |
+| Authorized | Running | Revalidate all gates, acquire lease, atomically consume authority and record start |
+| Running | Review required | Completed, contained, failed or interrupted outcome; retain pending intents |
+| Review required | Ready | Reconcile uncertainty, preserve evidence and verify clean baseline before another run |
+| Draft / Ready / Review required | Closed | No active worker/pending intent; revoke authority, preserve available evidence and record closure outcome |
 
-Resource limits and selected providers are in [the dependency record](implementation/dependencies.md). Current test evidence and native-VM gaps are in [the validation report](implementation/validation-report.md) and [VM acceptance plan](implementation/vm-test-plan.md).
+Phase 1 implements metadata creation/validation/inspection/closure and rejects
+unavailable execution operations; it does not add simulation. Empty drafts may
+close without datasets. Impacted experiments may close with unresolved damage
+after reconciliation and evidence capture; closure is not verified recovery.
+Closed experiments are read-only; repeat research in a new experiment.
+
+Run outcomes are completed, contained, failed or interrupted. Recovery attempts
+are pending, running, verified, partial or failed. Later observations can invalidate
+current verification without rewriting history. Existing prepared, armed,
+reconciliation_required, recovering and verification_lost results need explicit
+compatibility mappings in Phase 1.
+
+Commit an intent before each file change, then observe/verify bytes and commit a
+result. SQLite and filesystem changes are not atomic together. A missing result
+means uncertainty, never success or automatic retry. Restart with stale active
+records/pending intents requires reconciliation. Do not steal a possibly live
+lease, delete journals, or resume impact. Cancellation stops admission and is
+checked between bounded operations; kernel I/O has no hard real-time guarantee.
+
+## Persistence and concurrency
+
+Keep one SQLite database per experiment and the bounded registry. Existing
+events/state tables, sequence index, unique IDs, full synchronization, rollback
+journal, conditional updates and read-only connections remain the base. Add typed
+serialization/repositories and schema tests before normalizing more tables.
+Parameterize data queries and bound result pages, JSON depth, pages and retry time.
+
+Persist state and its event in one transaction. A mutation lease coordinates work,
+observation writes, evidence and recovery; containment uses a short conditional
+transaction without waiting for that lease. Reads never create missing stores.
+Retain SQLite sidecar rejection until native crash/sidecar safety is demonstrated.
+Do not enable WAL or automatic recovery as an unreviewed workaround.
+
+Unknown schemas fail closed. Migrations must be explicit, offline, backed up and
+verified, with no active experiments; failures retain a readable prior copy.
+Phase 0 migrates nothing. Runtime records and exports stay out of Git.
+
+## Telemetry, metrics and reproducibility
+
+Use independent snapshots for content integrity and scoped adapter observations
+for reads/staging/mock writes. Native notifications may accelerate polling later,
+but record dropped events and health. Polling does not detect reads or reliably
+see transient create/delete operations. Rename attribution requires a matching
+registered identity; otherwise report missing/new or unknown. Simulator labels
+belong to evaluation and must not become detector features.
+
+Default evaluation unit: one run/stage and one predeclared rule-family window.
+Match at most one deduplicated alert per eligible positive unit, counted as TP. Negative units
+with alerts are FP; positive units without a match are FN; silent negative units
+are TN. Persist matching policy and grace interval before execution. Preempted
+actions are prevention outcomes, not FN. Incomplete observation windows are
+unscorable and reduce coverage; never silently count them TN.
+Report alerts outside declared windows as unmatched rather than dropping them.
+
+Precision = TP/(TP+FP); recall = TP/(TP+FN); false-positive rate = FP/(FP+TN);
+F1 = 2TP/(2TP+FP+FN). Zero denominators yield null with a reason. Measure detection
+delay from the first qualifying observation to the first alert in one monotonic
+epoch; report action-to-observation delay separately when available. Missing
+detections and cross-restart uncertainty stay explicit. Retain sample counts,
+per-run values and supported median/p95 summaries.
+
+Recovery success = baseline files with verified restored hashes / all baseline
+files; missing/corrupt files remain in the denominator. Report bytes verified,
+duration, failures and current versus historical verification separately.
+Staged/mock-received bytes are measured local synthetic exposure. Comparisons
+require compatible scenario, generator, policy, rule and evaluation versions;
+otherwise report incomparable results.
+
+Store generator version/seed, synthetic class mix, action order/pacing, config and
+policy hashes, source revision, provider/runtime/platform versions and observer
+settings. Replay deterministic content/actions in a new experiment. UUIDs, times,
+fresh keys and nonces are intentionally nondeterministic; never seed operational
+crypto for identical ciphertext. Compare baselines/normalized actions and declared
+timing tolerances rather than exact encrypted bytes or wall clocks.
+
+## Interface and startup contract
+
+Keep argparse and stable structured errors. Flask reads the same services with
+token/session authentication, loopback binding, Host/Origin validation, escaping
+and request/query bounds. No mutation, remote-worker or upload endpoint is needed.
+Display unavailable metrics honestly. Machine inventory is declared, not probed.
+
+Phase 8's Bash wrapper will call shared Python preflight services, validate
+configuration/resources, prepare approved metadata, start the selected interface
+and forward shutdown signals. It must never auto-arm/run, install dependencies,
+or clean unrelated paths. PowerShell is limited to Windows-specific diagnostics
+or encoding needs. VMware home-lab configuration remains Phase 11 work.

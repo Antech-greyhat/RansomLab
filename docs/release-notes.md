@@ -1,39 +1,49 @@
-# Unreleased development build
+# Unreleased development status
 
-Status: local uncommitted implementation. No version tag, public release,
-published package or GitHub visibility change has been created. The owner has
-authorized implementation across phases and explicitly prohibited commits.
+## Phase 0 — architecture and repository audit
 
-## Added
+The 2026-11-11 Phase 0 change documents the existing RansomLab repository and
+proposes the phased plan for Antech-RansomLab for owner review. It adds no application
+functionality and does not complete later implementation phases.
 
-- Shared Python policy, hashing, event models and bounded SQLite repository.
-- Generated fixture registry, fixed-action scenario import/composition, run
-  lifecycle, observation rules, containment requests and reconciliation.
-- Evidence preservation, clean/decrypt recovery verification and incident-style
-  reports over the same application data.
-- CLI and loopback read-only Flask investigation dashboard.
-- Windows CNG authenticated-encryption adapter and optional reviewed-package
-  path for non-Windows encryption.
-- Read-only Windows/Kali preflight helpers, operating guides, VMware runbook and
-  competition report/demo materials.
+- Establish the central README, current capability/gap inventory and repository audit.
+- Specify shared services, versioned data/lifecycle contracts and technology decisions.
+- Define safety admission, synthetic provenance, interruption, protected clean copies
+  and a filesystem-only mock destination.
+- Specify six reproducible research scenarios and auditable evaluation metrics.
+- Replace obsolete no-commit/cross-phase instructions with one branch and reviewed
+  PR per phase, including the required co-author trailer.
+- Preserve application source, tests, scripts, dashboard assets and dependency pins.
 
-## Validation limits
+The owner explicitly authorized keeping the repository public and pushing Phase 0
+documentation. No release, tag, deployment, visibility change or Phase 1 work is
+authorized by that exception. Stop for Phase 0 review and merge.
 
-Consult [validation results](implementation/validation-report.md) and the component review
-documents for evidence. In-memory fixture workflows and real disposable SQLite
-tests do not establish native containment. Windows file-boundary cases are
-currently blocked by a denied ancestor under the managed development token.
-Actual VMware network isolation, snapshots, full guest lifecycle, performance
-profile and evidence screenshots remain unverified.
+## Inherited implementation
 
-Missing fixture object restoration is not implemented; failure remains explicit.
-Polling rules are intentionally simple. Local hashes do not make evidence
-tamperproof, and the VMware indicator does not independently prove isolation.
+The existing development build contains shared Python services, bounded SQLite
+events/state, generated fixture controls, two fixed-action scenarios, CNG crypto,
+integrity observations/count alerts, evidence/recovery/report services, CLI and a
+loopback read-only Flask dashboard. Windows/Kali preflight helpers and VM planning
+documents are retained; their presence is not deployment acceptance.
 
-## Before a release candidate can be accepted
+The [Phase 0 audit](phase-00-audit.md) records fresh validation: 101 passing tests,
+zero failures/errors, ten blocked native storage cases and a separately skipped
+VM class. Existing memory workflows do not establish native filesystem safety.
+The [older report](implementation/validation-report.md) is historical evidence only.
 
-Complete supported-guest native safety/recovery tests and an isolated VMware
-rehearsal; record exact runtimes, dependency/advisory review and reproducible
-environment artifacts; resolve findings; review synthetic example/export content;
-select a license; and obtain explicit publication approval. Keep no-commit and
-private-development restrictions in force until the owner changes them.
+## Known limitations and release gates
+
+Native filesystem races/crashes and full recovery need supported-platform evidence.
+Missing fixture restoration, multistage discovery/staging/mock transfer, canaries,
+asymmetric/signature studies and measured detector evaluation remain incomplete.
+Current count alerts are not rate measurements. Local hashes are not tamperproof
+evidence; logical clean-copy separation is not immutable backup security.
+
+Fresh installation, packaging/CI, dependency provenance/advisories, portable crypto,
+WSGI server maintenance and license selection remain open. Resolve critical/high
+security issues, complete phase-specific acceptance and obtain explicit owner
+release approval before publishing a release. Home deployment remains Phase 11.
+
+See [requirements](requirements.md), [security](security.md) and
+[contributing](contributing.md) for the current gates.

@@ -1,8 +1,10 @@
-# Installation and development setup
+# Installation and development setup reference
 
-RansomLab currently runs from a reviewed source checkout. There is no published
-release, signed installer or verified fresh-VM installation package. All changes
-remain uncommitted at the owner's instruction.
+The [README](../README.md#getting-started) is the current setup entry point.
+This reference preserves details of the inherited development environment.
+There is no published release, signed installer or verified fresh-install package.
+Phase 0 does not install dependencies or prepare virtual machines; the current
+[phase workflow](contributing.md) replaces earlier no-commit instructions.
 
 ## Current runtime and dependencies
 
@@ -62,7 +64,8 @@ platform validation, not a passing end-to-end VM exercise.
 
 ## Fresh guest preparation
 
-Before copying the reviewed source to a new guest, identify the exact supported
+This section is deferred planning, not a Phase 0 action. Before copying reviewed
+source to a new guest, identify the exact supported
 Windows 11/Kali/Python versions, selected VMware product, local filesystem,
 resource allocation and approved package source. Follow the [VMware runbook](vmware-lab.md).
 Prepare a project-specific environment only after its exact runtime/package
