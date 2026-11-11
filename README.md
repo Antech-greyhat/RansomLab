@@ -1,4 +1,4 @@
-# Antech-RansomLab
+#RansomLab
 
 A Python research laboratory for studying ransomware behaviour, detection,
 investigation, and recovery using generated disposable data.
