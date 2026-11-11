@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "antech-ransomlab"
+version = "0.1.0"
+description = "Controlled ransomware research, detection and recovery with synthetic data"
+readme = "README.md"
+requires-python = ">=3.13,<3.15"
+authors = [{name = "Antech-greyhat"}]
+dependencies = []
+
+[project.optional-dependencies]
+dashboard = ["Flask==3.1.3", "uvicorn==0.41.0"]
+
+[project.scripts]
+ransomlab = "ransomlab.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Antech-greyhat/RansomLab"
+
+[tool.setuptools.packages.find]
+include = ["ransomlab*"]
+
+[tool.setuptools.package-data]
+ransomlab = ["templates/*.html", "static/*.css", "static/*.js", "static/*.svg"]

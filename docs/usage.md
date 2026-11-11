@@ -1,9 +1,32 @@
 # Operator guide
 
-The [README](../README.md) is the current entry point. This reference documents
-inherited commands, not acceptance of the new research scenarios. Phase 0 runs
-read-only diagnostics and existing tests only; no VM preparation or file-impact
-exercise is performed. Home-lab deployment remains Phase 11.
+The [README](../README.md) is the quick start. This reference covers configuration,
+experiment records, and the generated-data workflow in an approved disposable lab.
+
+## Configuration and experiment records
+
+Use `ransomlab` after installing the package, or `python -m ransomlab` from the
+checkout. Both dispatch to the same services as the dashboard.
+
+```bash
+ransomlab --config ransomlab.example.toml config check
+ransomlab experiment create --name "Integrity study"
+ransomlab experiment inspect EXPERIMENT_ID
+ransomlab experiment validate EXPERIMENT_ID
+ransomlab experiment close EXPERIMENT_ID
+```
+
+Create makes an owned metadata-only draft with no dataset. Validation records a
+successful workspace/inventory check; it does not authorize execution. Closing
+revokes unused arming, preserves metadata, and rejects later mutations. Active or
+uncertain work must be reconciled. Affected working files must match the baseline
+again and completed runs must have preserved evidence before closure.
+
+Configuration defaults are loaded from `ransomlab.toml` in the source checkout;
+an explicit `--config` selects another bounded TOML document. No configuration
+can redirect file impact. Reopen with the same or stricter resource policy;
+attempts to relax an experiment's saved limits fail. INFO diagnostics are JSON
+on stderr; command results remain JSON on stdout.
 
 Run commands from the checkout root. This guide describes the implemented
 workflow for an approved disposable lab; it is not evidence that a VM exercise

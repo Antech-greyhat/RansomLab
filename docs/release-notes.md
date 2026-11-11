@@ -1,5 +1,23 @@
 # Unreleased development status
 
+## Application foundation
+
+- Add installable package metadata and the ransomlab console entry point, with an
+  optional dashboard extra and included templates/static assets.
+- Add immutable TOML configuration and lifecycle records, strict inventory and
+  saved-policy validation, and post-commit structured JSON diagnostics.
+- Add shared-service metadata-only experiment creation, validation, inspection,
+  listing and closure. Preserve legacy v1 data without implicit migration.
+- Reject mutations after closure, prevent empty experiments from arming, and keep
+  interrupted/affected experiments from closing before safe reconciliation/recovery.
+- Add lifecycle, failure, configuration, manifest and interface regression tests
+  and a Windows/Linux Python 3.13–3.14 CI matrix.
+- Rewrite README around project capabilities, installation, commands and safety;
+  keep audit history and phase governance in their dedicated documents.
+
+This does not add cryptography, simulation scenarios, VM configuration or new
+dashboard functionality. Native boundary checks remain distinct from memory tests.
+
 ## Phase 0 — architecture and repository audit
 
 The 2026-11-11 Phase 0 change documents the existing RansomLab repository and

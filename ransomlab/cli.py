@@ -11,14 +11,26 @@ import sys
 import time
 
 from . import __version__, crypto, environment, scenarios
+from .core.config import AppConfig
 from .core.errors import DependencyError, LabError, SafetyError, StateError, ValidationError
+from .core.logging import configure_logging
 
 
 def parser():
     root = argparse.ArgumentParser(prog="ransomlab", description="Generated-fixture cybersecurity training. No arbitrary file targets.")
     root.add_argument("--version", action="version", version=__version__)
+    root.add_argument("--config", help="Read a bounded TOML configuration; cannot change the workspace root")
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor", help="Read-only runtime and safety-gate diagnostics")
+    configuration = commands.add_parser("config", help="Validate and display effective configuration")
+    configuration.add_argument("action", choices=("check",))
+    experiments = commands.add_parser("experiment", help="Create, validate, inspect and close research records").add_subparsers(dest="action", required=True)
+    create_experiment = experiments.add_parser("create", help="Create an owned metadata-only draft")
+    create_experiment.add_argument("--name", default="Research experiment")
+    experiments.add_parser("list")
+    for name in ("inspect", "validate", "close"):
+        command = experiments.add_parser(name)
+        command.add_argument("experiment_id")
     lab = commands.add_parser("lab", help="Manage generated disposable labs").add_subparsers(dest="action", required=True)
     create = lab.add_parser("create", help="Generate original samples and verified clean copies")
     create.add_argument("--name", default="Training lab")
@@ -116,10 +128,18 @@ def markdown_report(report):
 def main(argv=None, service=None):
     args = parser().parse_args(argv)
     try:
-        if args.command == "doctor":
+        config = AppConfig.load(args.config) if args.config else AppConfig.discover()
+        configure_logging(config.log_level)
+        if args.command == "config":
+            value = config.to_dict()
+        elif args.command == "doctor":
             value = doctor()
+            value["configuration"] = config.to_dict()
         elif args.command == "serve":
             from .server import serve
+            if service is None:
+                from .services import LabService
+                service = LabService.default(config)
             serve(args.port, service=service)
             return 0
         elif args.command == "scenario" and args.action == "compose":
@@ -127,8 +147,15 @@ def main(argv=None, service=None):
         else:
             if service is None:
                 from .services import LabService
-                service = LabService.default()
-            if args.command == "lab":
+                service = LabService.default(config)
+            if args.command == "experiment":
+                if args.action == "create":
+                    value = service.create_experiment(args.name)
+                elif args.action == "list":
+                    value = service.list_experiments()
+                else:
+                    value = getattr(service, args.action + "_experiment")(args.experiment_id)
+            elif args.command == "lab":
                 if args.action == "create":
                     value = service.create_lab(args.name, args.count, args.size)
                 elif args.action == "list":
