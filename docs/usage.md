@@ -1,5 +1,10 @@
 # Operator guide
 
+The [README](../README.md) is the current entry point. This reference documents
+inherited commands, not acceptance of the new research scenarios. Phase 0 runs
+read-only diagnostics and existing tests only; no VM preparation or file-impact
+exercise is performed. Home-lab deployment remains Phase 11.
+
 Run commands from the checkout root. This guide describes the implemented
 workflow for an approved disposable lab; it is not evidence that a VM exercise
 has already passed. Use `python3` instead of `python` where appropriate on Kali.

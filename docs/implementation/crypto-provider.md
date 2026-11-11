@@ -6,7 +6,7 @@ Recorded: 2026-11-04. Scope: `ransomlab/crypto.py` and synthetic in-memory tests
 
 Phase 0 proposed the external `cryptography` package. The implemented Windows path instead calls the operating system's **Microsoft CNG AES-256-GCM** provider through Python's standard-library `ctypes`. This uses an established AES/GCM implementation; RansomLab does not implement AES, GHASH, padding or a substitute cipher. The change avoids installing an unreviewed package on Windows and must remain visible in the project decision record.
 
-The owner authorized implementation across phases and prohibited commits. This implementation adds no package installation and does not authorize publication, external services or VM configuration. On non-Windows platforms the module requires a separately approved `cryptography` installation. No exact version or installation source for that fallback has been approved or installed by this workstream; missing imports produce `DependencyError` rather than a replacement cipher. The tested capability is the Windows provider only.
+This is a historical provider decision. The 2026-11-11 [Phase 0 architecture](../architecture.md) and [contribution workflow](../contributing.md) supersede earlier cross-phase/no-commit directions. Phase 0 preserves this provider without installing packages or configuring VMs. On non-Windows platforms the module requires a reviewed `cryptography` installation; the inherited fallback has no verified exact installation manifest. Missing imports produce `DependencyError` rather than a replacement cipher. The tested capability in this review is the Windows provider only.
 
 ## Provider and maintenance contract
 

@@ -1,6 +1,10 @@
-# Development build validation report
+# Historical development build validation report
 
-Prepared 2026-11-04 for Antech-greyhat. Application version: 0.1.0. Source is uncommitted at the owner's direction. This report describes the current local build; it is not a claim that every deployment/release phase is complete.
+Prepared 2026-11-04 for Antech-greyhat, application version 0.1.0. This retained
+report describes the earlier build and its earlier phase numbering. It is not
+current authorization, fresh benchmark/browser evidence, or acceptance of the
+2026-11-11 phase plan. The [Phase 0 audit](../phase-00-audit.md) records the fresh
+test run; [contributing](../contributing.md) controls the one-phase review workflow.
 
 ## Result
 
@@ -76,6 +80,6 @@ These are a small concurrent-development sample, not a performance SLA. They do 
 
 ## Outstanding work
 
-Supply actual VMware/guest/runtime/filesystem details, verify isolation/snapshots and run [native acceptance](vm-test-plan.md) in the disposable guest. Complete adversarial native/crash testing, target-VM performance, verified artifact custody and competition rehearsal. Review exact dependency artifacts, license choice and public release content. No phase approval needs repeating, but missing evidence cannot be replaced by broad build authorization.
+The earlier build left VMware/guest/runtime/filesystem details, [native acceptance](vm-test-plan.md), adversarial native/crash testing, target-VM performance, verified artifact custody and competition rehearsal outstanding. Dependency artifacts, licensing and release content also remain to be reviewed. These are now subject to the current phased acceptance plan; no later phase is authorized by this historical report.
 
-No commits, tags, pushes, installs, network receiver, public exposure, deployment changes or real file-impact exercises were performed during this build. The repository remains on its unborn main branch because the attempted feature-branch update was denied by workspace permissions.
+The earlier report recorded no commits, pushes, installs, deployment changes or real file-impact exercises during that work session. Its then-unborn-branch description is no longer current: the repository contains merged history through d326a74. Refer to the Phase 0 audit and PR for current Git state and validation.

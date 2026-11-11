@@ -1,5 +1,10 @@
 # Native VM acceptance plan
 
+This is a retained future acceptance procedure, not a Phase 0 execution step.
+The current [test strategy](../requirements.md#test-strategy) separates approved
+native test runners from Phase 11 home-lab deployment. Do not configure the user's
+VMware or Kali environment during earlier phases.
+
 Status: authored, **not executed on a VM**. Default discovery intentionally skips the explicit VM acceptance gate. Neither that skip nor the in-memory service tests establish native filesystem, VM isolation or end-to-end deployment acceptance.
 
 ## Preconditions

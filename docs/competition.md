@@ -1,5 +1,10 @@
 # Competition preparation draft
 
+This inherited narrative is optional historical background, not the current
+product scope, research evidence or an instruction to configure a lab. Follow the
+[README](../README.md) and current phased acceptance plan. No competition
+rehearsal or VM deployment is part of Phase 0.
+
 Project: **RansomLab**. Owner: **Antech-greyhat**. Event: **Halloween Dooms Day**.
 This material is a rehearsal draft. Deadline, judging rules and allocated demo
 time remain unknown; no guest evidence or competition result is fabricated here.

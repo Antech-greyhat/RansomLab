@@ -1,56 +1,90 @@
-# Contributing during private development
+# Contributing to Antech-RansomLab
 
-RansomLab belongs to Antech-greyhat and is being developed for an educational
-cybersecurity challenge. Read the [requirements](requirements.md),
-[architecture](architecture.md) and [security boundaries](security.md)
-before changing the application.
+Read the [README](../README.md), [architecture](architecture.md),
+[requirements](requirements.md) and [safety boundaries](security.md).
+The active workflow is one phase at a time. Historical documents cannot authorize
+cross-phase work or override the owner's current instructions.
 
-The owner currently requests **no commits**. Keep work uncommitted; do not push,
-merge, create release tags or change repository visibility. A local feature
-branch is not permission to publish. If the owner later authorizes commits,
-follow the reviewed feature-branch, meaningful-prefix and review workflow.
+## Branch, commit and review workflow
 
-## Engineering workflow
-
-1. Identify the requirement, affected interfaces and observable acceptance cases.
-2. Add meaningful failing tests for new behaviour, including negative/failure
-   cases for safety, cryptography, persistence and recovery.
-3. Implement a small cohesive change. Keep domain rules and safety checks in
-   shared services rather than duplicating them in CLI, templates or scripts.
-4. Run affected tests and relevant safety/recovery regressions. Record the exact
-   environment and distinguish real-platform checks from mocks or RAM fixtures.
-5. Request review with the problem, resulting behaviour, validation evidence,
-   safety impact and remaining limitations. Resolve routine defects within the
-   authorized work; do not reopen already accepted phase gates.
-
-Use Python's standard library when practical. New packages, source changes,
-unreviewed upgrades and implicit downloads require the project's dependency
-review and installation authorization. Do not copy a custom cipher into the
-project to avoid a dependency.
-
-The current test entry point is:
+1. Inspect the working tree, branches, history and repository instructions.
+   Preserve existing valid work and use the existing Antech-greyhat/RansomLab repo.
+2. Create one feature branch per phase, starting with phase-00-architecture.
+   Never commit directly to main.
+3. Complete only the phase's scope and acceptance checks. Phase 0 changes
+   documentation only; no new application/simulation code, installs or VM setup.
+4. Run relevant tests and inspect the complete diff for defects, secrets and
+   generated artifacts. Record failed, skipped and environment-blocked checks.
+5. Commit with a meaningful feat/fix/docs/test/refactor/security/chore prefix.
+   Every assistant-authored commit, including documentation-only commits, must
+   contain the exact trailer below; verify the stored commit message.
+6. Push the phase branch and open a PR against main with the required structure.
+   Report the commit hash, PR URL, validation and limitations.
+7. Stop for owner review and merge. Never self-merge, bypass review, change branch
+   protections, or begin the next phase while its predecessor awaits review.
 
 ```text
-python -m unittest discover -s tests -v
+Co-authored-by: technorant <223033055+technorant@users.noreply.github.com>
 ```
 
-Blocked native checks must remain visible and block unsupported release claims.
-Do not remove a failing ancestor check, use a real personal file as a negative
-test decoy, or add an environment flag that bypasses execution safeguards.
+Example commit and verification after staging only reviewed phase files:
 
-## Artifact hygiene
+```bash
+git commit -m "docs: establish Phase 0 architecture and safety baseline" -m "Co-authored-by: technorant <223033055+technorant@users.noreply.github.com>"
+git log -1 --format=%B
+git diff --check
+```
 
-Never add credentials, API keys, run keys, dashboard tokens, actual malware,
-personal documents, private incident data, runtime `.ransomlab` stores, VM images
-or unreviewed browser traces to source control. Use generated synthetic fixtures
-and reviewed small examples. Inspect diffs and artifacts before any future
-authorized commit or distribution; deleting a secret later does not erase it
-from history.
+If authentication, network, push or PR creation fails, finish safe local work and
+report the exact blocker. Do not claim remote completion.
 
-## License recommendation
+The owner explicitly authorized keeping the existing repository public and pushing
+Phase 0 documentation on 2026-11-11. This is not release/tag/deployment approval.
+Do not change visibility. Main protection is owner-managed.
 
-MIT is a candidate license for the educational source because it is simple and
-widely understood. This is a recommendation only: no license has been selected
-or granted in this build. The owner must review licensing, third-party notices
-and public release contents before publication. A permissive license is not a
-technical control over downstream misuse; runtime boundaries remain essential.
+## Pull request format
+
+Title: **[Phase XX] Short description**
+
+- Objective.
+- Implemented features (documentation deliverables for Phase 0).
+- Architectural decisions.
+- Files added or modified.
+- Tests executed and results.
+- Security considerations.
+- Acceptance criteria.
+- Known limitations.
+- Recommended next phase.
+
+Link relevant requirements/tests and identify unanswered decisions. Describe the
+final change for a reviewer who has not read the development conversation.
+
+## Engineering and validation
+
+Keep business logic and safety decisions in shared Python services. Prefer
+standard-library components where suitable; justify dependencies and review
+versions, artifacts, advisories and licenses before installation. No custom cipher,
+React or separate frontend pipeline. Use concise types/docstrings and meaningful
+failure tests instead of placeholder features or fake data presented as results.
+
+The existing suite runs with:
+
+```bash
+python scripts/validate.py
+```
+
+The ordinary suite uses memory fixtures for service impact. Native boundary
+acceptance is distinct and required for platform claims. Do not change tests or
+remove protections merely to hide a failing prerequisite. Test decoys must also
+be generated disposable data. Do not modify VMware/Kali in earlier phases.
+
+## Artifact hygiene and licensing
+
+Never commit credentials, access tokens, runtime keys, live .ransomlab stores,
+real malware, user documents, private incident evidence, VM images or unreviewed
+browser traces. Scan staged content and inspect the diff before every commit.
+Deleting a secret later does not erase it from history.
+
+No license is currently selected. MIT remains a recommendation for owner review,
+not a granted license. Review third-party notices and the final release content
+before choosing and publishing licensing. Public visibility is not a substitute.

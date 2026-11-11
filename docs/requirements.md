@@ -1,64 +1,119 @@
-# Product requirements
+# Requirements and phase acceptance
 
-RansomLab is an educational and defensive cybersecurity platform for the Halloween Dooms Day challenge. It teaches cryptography, ransomware-related behaviour, file integrity, detection, investigation, containment, recovery and evidence reporting using generated disposable data.
+Phase 0 baseline, 2026-11-11. This replaces the earlier competition-specific phase
+mapping. Existing implementation is preserved but does not waive review of the
+new phased requirements. [README](../README.md) is the main laboratory guide.
 
-The application serves a single local operator. Learner, investigator and competition reviewer are workflow roles, not separate authenticated user accounts. Windows 11 is the intended exercise guest, Kali prepares fixed-action scenarios and analyses exports, and Windows 10 is an optional forensic workstation.
+## Research requirements
 
-## Functional requirements
-
-| ID | Capability | Acceptance evidence |
+| ID | Required outcome | Primary phase / evidence |
 | --- | --- | --- |
-| PR-01 | Reversible cryptographic demonstrations over generated samples | Authenticated round trip, tampering/wrong-key rejection and recoverable originals |
-| PR-02 | Controlled sample generation and SHA-256 integrity | Bounded registered fixtures; known baseline hashes; changed/missing results |
-| PR-03 | Configuration validation, audit events and change primitives | Invalid configuration rejected; ordered journal and failure tests |
-| PR-04 | Explicit lab inventory, bounded scenarios and attack timelines | Data-only local import; no general execution, scanning or autonomous target selection |
-| PR-05 | Monitoring, suspicious activity detection, correlation and alerts | Explainable synthetic cases with documented false positives and polling limits |
-| PR-06 | Investigation and application-managed containment | Incident reconstruction and bounded stop behaviour |
-| PR-07 | Evidence preservation and verified clean-copy recovery | Provenance/manifest checks and restored bytes matching the baseline |
-| PR-08 | CLI with help, validation, structured output and errors | Shared-service delegation and documented exit behaviour |
-| PR-09 | Local dashboard with status, timeline, changes, alerts, findings and reports | Loopback access controls; shared models; browser verification |
-| PR-10 | Incident reports, synthetic indicators and recovery recommendations | Report data linked to run and evidence identifiers |
-| PR-11 | Integration, security, regression, performance and recovery assessment | Recorded results with supported-platform safety gates |
-| PR-12 | Installation, architecture, security, contribution and release documentation | Reviewed release candidate and explicit publication authorization |
-| PR-13 | Isolated VMware exercise | Isolation, snapshots, generated data and rollback verified before execution |
-| PR-14 | Competition report, demonstration and presentation materials | Rehearsed narrative and evidence traceable to a real exercise |
+| R-01 | Create, validate, persist, inspect and close an owned experiment safely | 1; lifecycle/state, reopen and negative-boundary tests |
+| R-02 | Hashing, authenticated symmetric and asymmetric crypto, signatures and key-management demonstrations | 2; established provider vectors, tamper rejection, synthetic round trips and timings |
+| R-03 | Repeatable bounded discovery, modification, note, staging and filesystem-only mock transfer | 3; actual artifacts/receipts, no external access, replay provenance |
+| R-04 | Baseline/metadata, changes, missing/new files, rename attribution, canaries and observer health | 4; independently induced synthetic changes, loss/unknown states |
+| R-05 | Configurable rules, correlation, severity, time windows, measured latency and classification | 5; labelled positive/negative trials, precision/recall/FPR/F1 and coverage |
+| R-06 | Verifiable evidence, provenance, incident timelines and investigation records | 6; independent manifest checks, tamper/missing tests |
+| R-07 | Protected clean copies, restoration and complete recovery validation | 7; restored baseline hashes including safe missing-file restoration and failures |
+| R-08 | Shared-core CLI and functional local dashboard, JSON and human-readable reports | 8; consistent service results, authentication and empty/unavailable states |
+| R-09 | Experiment comparison, reproducibility, prevention/control evaluation | 3–9; compatible versioned trials, blocked actions separate from missed detections |
+| R-10 | Startup preflight, bounded services and clean shutdown without auto-simulation | 8; Bash/Python integration and failure tests |
+| R-11 | Unit/integration/end-to-end, security, interruption, regression and dependency assurance | 9; no unresolved critical/high release issues |
+| R-12 | Installation, operating guide, troubleshooting, license review and release preparation | 10; commands tested against implemented entry points, explicit release approval |
+| R-13 | Previously planned VMware home laboratory | 11 only; owner-approved environment after implementation, review, merge and release preparation |
 
-## Safety requirements
-
-| ID | Boundary | Required outcome |
-| --- | --- | --- |
-| SAF-01 | Generated disposable fixtures only | Every impact operation checks the registered generated objects; no arbitrary directory targeting |
-| SAF-02 | Reversible and recoverable operations | Verified clean copies before impact; successful recovery requires complete baseline matches |
-| SAF-03 | No propagation or general execution | No spreading, uploaded executable scenarios, shell commands or arbitrary target paths |
-| SAF-04 | No host compromise features | No evasion, security-tool disabling, persistence or credential theft |
-| SAF-05 | No unrelated collection or exfiltration | Evidence is limited to generated data and application events; transfers are explicit and bounded |
-| SAF-06 | Fail-closed enforcement | Invalid inputs, unsafe links, missing protections, quota failures and uncertain state stop impact |
-| SAF-07 | Auditability | Durable intent/result records; visible interruptions; secrets excluded from logs |
-| SAF-08 | Scoped containment | Stop application-managed work without killing unrelated processes or changing host security policy |
-| SAF-09 | Controlled lab and local management | Isolated disposable guests; no external administrative dashboard exposure |
+All operations use generated synthetic data. The mandatory safety requirements
+and attack/verification matrix are in [security](security.md). The six scenario
+contracts, including benign controls, are in [research scenarios](research-scenarios.md).
 
 ## Engineering requirements
 
-| ID | Requirement |
+Use a shared Python core with typed versioned records, explicit exceptions,
+bounded structured logs and SQLite persistence. CLI/dashboard must not duplicate
+business logic. Bash serves Linux startup/preparation; PowerShell is limited to
+justified Windows-specific tasks. No React or separate frontend build without
+explicit approval. No automatic dependency downloads or VM configuration.
+
+Preserve valid source/tests. Refactor by reviewed phase, avoiding empty placeholder
+implementations, fake metrics, fabricated results, swallowed errors or removed
+safety gates. README remains central; supplementary documents must serve an actual
+architecture, safety, research or evidence purpose.
+
+## Phase acceptance criteria
+
+| Phase | Reviewable acceptance |
 | --- | --- |
-| ENG-01 | Modular Python core; narrow PowerShell/Bash helpers without duplicated safety decisions |
-| ENG-02 | Shared application services and versioned event/data contracts for both interfaces |
-| ENG-03 | Incremental changes, meaningful tests, explicit errors and documented limits |
-| ENG-04 | Prefer standard library; document and review each dependency, constraint and installation source |
-| ENG-05 | Reproducible fixtures and metadata; wall clocks alone do not establish event order |
-| ENG-06 | Private development, reviewed changes and controlled versioning; commits remain subject to owner instruction |
-| ENG-07 | No credentials, personal data, malware samples, sensitive evidence or runtime keys in Git |
-| ENG-08 | Keep architecture/dependency changes visible and obtain explicit authorization before publication |
+| 0 | Repository/history/config audit; current-versus-target architecture, data/lifecycle contracts, threat model, technology decisions, six scenarios, test strategy and README; documentation checks; correctly attributed commit and PR; no application changes |
+| 1 | Package/configuration, typed core models, experiment create/validate/store/inspect/close, shared storage/logging and safety framework pass unit/integration/boundary tests |
+| 2 | Established crypto providers and integrity/signature/key demonstrations are bounded, reversible, measured, reproducible and tested on synthetic data |
+| 3 | Researcher can run a bounded multistage scenario with actual discovery/stage/mock receipts and durable interruption outcomes; no arbitrary files or external destinations |
+| 4 | Real changes to approved generated objects produce normalized observations; canary, rename/missing/new and monitor-health tests establish supported semantics |
+| 5 | Versioned rules detect labelled behaviours; positive/negative windows produce auditable metrics, latency and coverage without truth-label leakage |
+| 6 | Independent reader can verify evidence and reconstruct the incident; missing, tampered or partial bundles stay explicit |
+| 7 | Complete restore matches baseline or identifies every unsuccessful restoration; simulator cannot obtain backup write capability |
+| 8 | CLI/dashboard query the same core; real history, alerts, timelines, evidence, recovery and metrics agree; safe startup/shutdown works |
+| 9 | Critical tests pass across supported platforms; interrupted/disk-full/concurrency cases pass; no unresolved critical/high security issues |
+| 10 | README commands, installation and dependency/license inventories, release notes and limitations are verified; owner explicitly approves release |
+| 11 | Approved VMware instructions match supplied environment and demonstrate isolated startup, experiment, investigation and recovery |
 
-## Exercise flow
+Every phase requires its own feature branch, tests, full diff/artifact review,
+co-author-verified commit, push and PR against main. Never merge the PR or start
+the next phase while review/merge is pending. An unavailable GitHub operation is
+a blocker to report, not a reason to claim completion.
 
-1. Generate a bounded dataset and verify clean copies and baseline hashes.
-2. Export the generated IDs, compose a fixed-action scenario on Kali and import it locally on Windows.
-3. Validate the guest, isolation/snapshot assertions, scenario and working fixture inventory before arming.
-4. Record controlled actions separately from observed file changes and detector findings.
-5. Contain or reconcile interrupted work, preserve evidence and recover registered objects.
-6. Verify the complete inventory and report both successful and incomplete outcomes.
+## Phase 0 review checklist
 
-Production endpoint protection, real victim recovery, actual malware, internet-facing services, network scanning and claims of forensic admissibility are outside scope. Live VMware facts and competition rules remain to be supplied; missing-object restoration and native validation are recorded limitations, not completed capabilities.
+- [ ] P0-01: Audit ties findings to the existing main revision, branches, files,
+  visibility, protections and actual fresh validation.
+- [ ] P0-02: Architecture separates existing behaviour from proposed modules,
+  dependencies, records, lifecycle, migrations and interface contracts.
+- [ ] P0-03: Safety specifies synthetic provenance, ownership, path/link controls,
+  budgets, authorization, backup separation, interruption and mock-destination limits.
+- [ ] P0-04: Six scenario specifications include all research/operational fields;
+  metric definitions separate truth, telemetry, controls and unavailable evidence.
+- [ ] P0-05: README contains only implemented command syntax and clearly gates
+  file-impact workflows; setup/startup gaps are disclosed.
+- [ ] P0-06: Existing suite and documentation/repository checks are recorded,
+  including skipped/blocked native checks and limitations.
+- [ ] P0-07: Diff is documentation-only, reviewed for secrets/generated artifacts;
+  commit trailer is verified; branch/PR links are supplied.
+- [ ] P0-08: Owner reviews and merges; Phase 1 remains unstarted.
 
-See [architecture](architecture.md), [security](security.md), [dependencies](implementation/dependencies.md) and [validation results](implementation/validation-report.md) for implementation details and remaining acceptance work.
+Checkboxes are owner acceptance, not automatic claims of signoff. The audit and
+PR carry execution results.
+
+## Test strategy
+
+Retain unittest initially: the repository already has useful tests and a structured
+runner. Introduce pytest/property-testing only if a later concrete need justifies
+dependencies. Distinguish memory adapters from actual native I/O.
+
+| Layer | Meaningful tests and failure cases | Execution boundary |
+| --- | --- | --- |
+| Documentation/repository | UTF-8, local links/anchors, fences, command parser agreement, diff whitespace, secret/artifact checks, trailer and branch/PR base | Phase 0; no runtime writes beyond validation artifacts |
+| Core/lifecycle | Missing/unknown fields, bool-versus-int, invalid IDs, transitions, expired/revoked approval, closure, reopened persistence | Generated metadata and SQLite only |
+| Filesystem/security | Traversal/prefix collision, symlink/junction/hard-link, aliases/streams, foreign ownership, inventory replacement, ancestor races, quota edges | Owned disposable fixtures/decoys; native platform required |
+| Crypto | Published known answers, wrong key/nonce/AAD/tag, signed-message tamper, size edges, provider failure, nonces across interruption | Synthetic RAM bytes, then guarded synthetic files |
+| Simulation | Stage order, fixed operations, real digests/receipts, replay, cancellation, denied paths/destinations, socket/DNS attempts absent | No user data, external service or live malware |
+| Telemetry/detection | Independently change/create/rename/delete generated objects, canary touches, benign bursts, slow positives, event loss, duplicate/out-of-order events | Labels hidden from detectors; windows fixed in advance |
+| Forensics/recovery | Tampered/missing artifacts, partial preservation, corrupted backup/key, missing working file, post-restore changes, complete hash comparison | Preserve before restoration; never erase failed evidence |
+| Failure/concurrency | Before/after intent crash, partial write, result commit failure, disk/journal full, locks, competing containment, stale worker, sidecar substitution | Inject faults in tests; no production safety bypass |
+| Interface/integration | CLI/service/dashboard consistency, empty history, errors, auth, Host/Origin, escaping, bounds, startup signals, no auto-run | Loopback/local only |
+| Reproducibility | Same generator/config yields same baseline and normalized action plan; fresh IDs/keys/nonces; version incompatibility explicit | Compare semantics with declared timing tolerances |
+| Dependency/release | Maintained versions, source/artifact hashes, licenses, advisories, clean environment install and supported OS/Python matrix | Later phase; record review date and unresolved advisories |
+
+Use existing prepared disposable test runners for native acceptance only when
+their ownership and environment are approved; do not configure the user's VMware
+or Kali during earlier phases. Test scripts must fail closed if prerequisites are
+missing. Python 3.13/3.14, Windows/NTFS, and selected Linux filesystems are proposed
+targets, not an established support matrix.
+
+Record revision, environment, command, passed/failed/skipped counts and skip
+reasons. No blocked/skipped test is a pass. A green ordinary suite does not certify
+native containment. Do not rerun with elevated privileges or mocks to turn a
+native prerequisite failure into a claimed success.
+
+Existing commands are `python scripts/validate.py` (also emits ignored JSON)
+or `python -m unittest discover -s tests -v`. Native acceptance remains a separate
+explicit runner described in the retained [VM test plan](implementation/vm-test-plan.md).
+No new application tests or runtime code are added in Phase 0.
