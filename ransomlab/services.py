@@ -16,7 +16,7 @@ import shutil
 import time
 from uuid import uuid4, uuid5, UUID
 
-from . import crypto, environment, research, scenarios
+from . import crypto, environment, research, scenarios, simulation
 from .core.config import AppConfig, Policy
 from .core.errors import LabError, SafetyError, StateError, ValidationError
 from .core.events import Event, utc_now, validate_id
@@ -30,6 +30,7 @@ from .storage import LabLease, SafeDirectory
 MAX_LABS = 8
 MAX_RUNS = 20
 MAGIC = b"RANSOMLAB1\x00"
+MAX_EVIDENCE_MANIFEST = 262144
 
 
 def _label(value):
@@ -151,7 +152,7 @@ class LabService:
     def _event(self, store, lab, kind, *, updates=None, expected=None, **values):
         protected = {"file.intent", "file.changed", "file.restored", "run.completed", "run.contained", "run.interrupted",
                      "recovery.started", "recovery.verified", "recovery.failed", "evidence.started", "evidence.preserved", "containment.requested", "experiment.closed",
-                     "crypto.completed", "crypto.contained", "crypto.interrupted"}
+                     "crypto.completed", "crypto.contained", "crypto.interrupted", "artifact.created", "artifact.area_ready"}
         reserve = len(lab["fixtures"]) * 3 + 16
         if kind not in protected and store.count() + reserve + 1 > self.policy.max_events:
             raise StateError("Audit capacity is reserved for containment, evidence and recovery")
@@ -198,6 +199,7 @@ class LabService:
                 clean = stack.enter_context(SafeDirectory(path / "clean", create=True))
                 stack.enter_context(SafeDirectory(path / "keys", create=True))
                 stack.enter_context(SafeDirectory(path / "evidence", create=True))
+                stack.enter_context(SafeDirectory(path / "artifacts", create=True))
                 fixtures = []
                 for index in range(count):
                     fixture_id = str(uuid4())
@@ -367,9 +369,21 @@ class LabService:
             return {"schema_version": 1, "lab_id": lab_id, "baseline_id": lab["baseline_id"],
                     "fixtures": [{"id": item["id"]} for item in lab["fixtures"]]}
 
-    def create_scenario(self, lab_id, scenario, count=None):
+    def create_scenario(self, lab_id, scenario, count=None, **configuration):
         with self._open(lab_id, readonly=True) as (lab, _, __):
-            return scenarios.create(lab, scenario, count)
+            return scenarios.create(lab, scenario, count, **configuration)
+
+    def replay_scenario(self, lab_id, request_id):
+        validate_id(request_id)
+        with self._open(lab_id, readonly=True) as (lab, store, _):
+            request = store.get_state("request:" + request_id)
+            if not request or hash_bytes(scenarios.canonical(request["envelope"])) != request["digest"]:
+                raise ValidationError("A verified imported scenario request is required for replay")
+            return scenarios.replay(request["envelope"], lab)
+
+    def run_history(self, lab_id):
+        with self._open(lab_id, readonly=True) as (_, store, __):
+            return [store.get_state("run:" + run_id) for run_id in store.get_state("runs", [])]
 
     def import_scenario(self, envelope):
         if type(envelope) is not dict:
@@ -377,6 +391,12 @@ class LabService:
         lab_id = validate_id(envelope.get("lab_id"))
         with self._open(lab_id, lease=True) as (lab, store, _):
             scenarios.validate(envelope, lab)
+            parent_id = envelope.get("replay_of")
+            if parent_id:
+                parent = store.get_state("request:" + parent_id)
+                if (not parent or hash_bytes(scenarios.canonical(parent["envelope"])) != parent["digest"]
+                        or scenarios.plan_digest(parent["envelope"]) != scenarios.plan_digest(envelope)):
+                    raise ValidationError("Replay lineage must reference the same verified imported plan")
             request_id = envelope["request_id"]
             digest = hash_bytes(scenarios.canonical(envelope))
             existing = store.get_state("request:" + request_id)
@@ -547,6 +567,8 @@ class LabService:
                 raise ValidationError("Scenario request is not staged")
             if request["status"] != "staged":
                 return {"request_id": request_id, "status": request["status"], "duplicate": True}
+            if hash_bytes(scenarios.canonical(request["envelope"])) != request["digest"]:
+                raise SafetyError("Staged scenario content changed after import")
             envelope = scenarios.validate(request["envelope"], lab)
             self._ready(lab, store, path)
             arm = store.get_state("arm")
@@ -554,7 +576,10 @@ class LabService:
                 raise SafetyError("A current locally armed session is required")
             environment.require_guest(arm["attestation"])
             ids = envelope["fixture_ids"]
-            if len(ids) > self.policy.max_actions or store.count() + len(ids) * 5 + len(lab["fixtures"]) * 3 + 50 > self.policy.max_events:
+            config = scenarios.configuration(envelope)
+            actions = scenarios.action_count(envelope)
+            if (actions > self.policy.max_actions or actions * config["interval_ms"] > self.policy.max_run_seconds * 1000
+                    or store.count() + actions * 5 + len(lab["fixtures"]) * 3 + 50 > self.policy.max_events):
                 raise SafetyError("Insufficient action or audit capacity including recovery reserve")
             runs = store.get_state("runs", [])
             if len(runs) >= MAX_RUNS:
@@ -564,15 +589,50 @@ class LabService:
                 crypto.provider_name()
             run_id = str(uuid4())
             run = {"run_id": run_id, "request_id": request_id, "scenario": scenario, "state": "running", "started_at": utc_now(),
-                   "ended_at": None, "affected": [], "attestation": arm["attestation"]}
+                   "ended_at": None, "affected": [], "attestation": arm["attestation"], "lab_id": lab_id,
+                   "baseline_id": lab["baseline_id"], "generator": lab["generator"], "policy": self.policy.to_dict(),
+                   "scenario_version": envelope.get("scenario_version", 1), "configuration": config,
+                   "fixture_ids": list(ids), "plan_sha256": scenarios.plan_digest(envelope),
+                   "replay_of": envelope.get("replay_of"), "planned_actions": actions,
+                   "discovered": [], "artifacts": [], "artifacts_initialized": False}
+            bundle = scenario in scenarios.MULTISTAGE
+            reservation = {}
+            if bundle:
+                with SafeDirectory(path / "artifacts"):
+                    pass
+                fixtures = {item["id"]: item for item in lab["fixtures"]}
+                artifact_bytes = (sum(fixtures[item]["size"] for item in ids[:config["stage_count"]])
+                                  + sum(fixtures[item]["size"] for item in ids[:config["receive_count"]])
+                                  + (len(simulation.note(lab_id, run_id)) if scenario == "double_extortion_generated" else 0))
+                artifact_count = config["stage_count"] + config["receive_count"] + (1 if scenario == "double_extortion_generated" else 0)
+                reserved_bytes = store.get_state("artifact_reserved_bytes", 0) + artifact_bytes
+                reserved_files = store.get_state("artifact_reserved_files", 0) + artifact_count
+                if reserved_bytes > self.policy.max_total_bytes * 2 or reserved_files > self.policy.max_files * 2 + MAX_RUNS:
+                    raise SafetyError("Generated staging and mock receipt retention ceiling reached")
+                evidence_required = (sum(item["size"] + 64 for item in lab["fixtures"]) + artifact_bytes
+                                     + len(scenarios.canonical(self._all_events(store)))
+                                     + actions * 5 * self.policy.max_event_bytes + MAX_EVIDENCE_MANIFEST)
+                if sum(item["bytes"] for item in store.get_state("evidence", [])) + evidence_required > self.policy.max_evidence_bytes:
+                    raise SafetyError("Insufficient evidence retention capacity for the planned scenario")
+                self._space(artifact_bytes + self.policy.max_evidence_bytes)
+                reservation = {"artifact_reserved_bytes": reserved_bytes, "artifact_reserved_files": reserved_files,
+                               "pending": {"kind": "artifact_area", "run_id": run_id}}
+                run["artifact_reservation"] = {"bytes": artifact_bytes, "files": artifact_count}
             request["status"] = "consumed"
             runs.append(run_id)
-            self._event(store, lab, "run.started", source="simulator", run_id=run_id, details={"scenario": scenario, "request_id": request_id, "count": len(ids), "state": "running"},
+            self._event(store, lab, "run.started", source="simulator", run_id=run_id, details={"scenario": scenario, "request_id": request_id, "count": len(ids), "action_count": actions, "sha256": run["plan_sha256"], "state": "running"},
                         updates={"active_run": run_id, "run:" + run_id: run, "request:" + request_id: request, "runs": runs,
-                                 "arm": None, "recovery": None}, expected={"arm": arm, "stop_requested": False})
+                                 "arm": None, "recovery": None, **reservation}, expected={"arm": arm, "stop_requested": False})
             key = secrets.token_bytes(32) if scenario == "encrypt_generated" else None
             nonce_prefix = secrets.token_bytes(4)
             started = time.monotonic()
+
+            def checkpoint():
+                if store.get_state("stop_requested"):
+                    raise simulation.SimulationStopped("operator_requested")
+                if time.monotonic() - started >= self.policy.max_run_seconds:
+                    raise simulation.SimulationStopped("deadline_reached")
+
             try:
                 if key:
                     self._event(store, lab, "key.created", run_id=run_id, outcome="pending", details={"operation": "create_run_key"})
@@ -580,48 +640,173 @@ class LabService:
                         keys.create(f"run-{run_id}.key", key)
                 with SafeDirectory(path / "work") as work:
                     fixtures = {item["id"]: item for item in lab["fixtures"]}
-                    for number, fixture_id in enumerate(ids):
-                        if store.get_state("stop_requested") or time.monotonic() - started >= self.policy.max_run_seconds:
-                            run["state"] = "contained"
-                            break
-                        fixture = fixtures[fixture_id]
-                        self._space(self.policy.max_file_bytes * 2)
-                        before = work.read(fixture["name"], self.policy.max_file_bytes)
-                        if hash_bytes(before) != fixture["sha256"]:
+
+                    def read_fixture(fixture):
+                        if work.identity(fixture["name"]) != fixture["identity"]:
+                            raise SafetyError("Generated fixture object identity changed")
+                        data = work.read(fixture["name"], fixture["size"])
+                        if hash_bytes(data) != fixture["sha256"]:
                             raise SafetyError("Fixture changed since preparation")
+                        return data
+
+                    def impact(fixture, number=0):
+                        checkpoint()
+                        self._space(self.policy.max_file_bytes * 2)
+                        before = read_fixture(fixture)
                         if key:
                             nonce = nonce_prefix + number.to_bytes(8, "big")
                             after = MAGIC + nonce + crypto.encrypt(before, key, nonce, self._aad(lab, run, fixture))
                         else:
                             marker = b"RANSOMLAB SIMULATED CHANGE\n"
                             after = marker + before[len(marker):]
-                        self._mutate(store, lab, work, fixture, before, after, run_id, scenario)
-                        run["affected"].append(fixture_id)
+                        checkpoint()
+                        self._mutate(store, lab, work, fixture, before, after, run_id, scenario, run=run)
                         self._scan(lab, store, path, run_id, updates={"run:" + run_id: run})
-                if run["state"] == "running":
-                    run["state"] = "completed"
-                run["ended_at"] = utc_now()
-                self._event(store, lab, "run.contained" if run["state"] == "contained" else "run.completed", source="simulator", run_id=run_id,
-                            details={"state": run["state"], "count": len(run["affected"])}, updates={"run:" + run_id: run})
-            except (LabError, OSError, KeyboardInterrupt):
-                run["state"], run["ended_at"] = "interrupted", utc_now()
+
+                    if bundle:
+                        # The admitted start is also the durable intent for exclusive area creation.
+                        with SafeDirectory(path / "artifacts" / run_id, create=True) as artifacts:
+                            run["artifacts_initialized"] = True
+                            self._event(store, lab, "artifact.area_ready", source="simulator", run_id=run_id,
+                                        details={"state": "ready"}, updates={"pending": None, "run:" + run_id: run})
+
+                            def emit(kind, **kwargs):
+                                return self._event(store, lab, kind, source="simulator", run_id=run_id, **kwargs)
+
+                            def write_artifact(kind, fixture, data):
+                                checkpoint()
+                                self._write_artifact(lab, store, path, run, artifacts, kind, fixture, data)
+
+                            def read_staged(fixture):
+                                self._artifact_snapshot(lab, path, run)
+                                return artifacts.read("stage-" + fixture["id"] + ".bin", fixture["size"])
+
+                            simulation.BehaviourRunner([fixtures[item] for item in ids], run, config, read_fixture,
+                                                      write_artifact, read_staged, impact, emit, checkpoint).execute()
+                    else:
+                        for number, fixture_id in enumerate(ids):
+                            if number:
+                                simulation.pace(config["interval_ms"], checkpoint)
+                            impact(fixtures[fixture_id], number)
+                checkpoint()
+                self._finish_run(lab, store, run_id, "completed")
+            except simulation.SimulationStopped as exc:
+                self._finish_run(lab, store, run_id, "contained", str(exc))
+            except (LabError, OSError, KeyboardInterrupt) as exc:
+                if isinstance(exc, StateError) and store.get_state("stop_requested") and not store.get_state("pending"):
+                    return self._finish_run(lab, store, run_id, "contained", "operator_requested")
                 # A failed journal leaves the last durable intent for reconciliation.
                 try:
-                    self._event(store, lab, "run.interrupted", source="simulator", severity="high", outcome="unknown", run_id=run_id,
-                                details={"state": "interrupted", "reason": "operation_failed"}, updates={"run:" + run_id: run})
+                    self._finish_run(lab, store, run_id, "interrupted", "operation_failed")
                 except LabError:
                     pass
                 raise
             finally:
                 key = None
-            return run
+            return store.get_state("run:" + run_id)
+
+    def _finish_run(self, lab, store, run_id, state, reason=None):
+        run = store.get_state("run:" + run_id)
+        run.update(state=state, ended_at=utc_now())
+        details = {"state": state, "count": len(run["affected"])}
+        if reason:
+            run["reason"] = reason
+            details["reason"] = reason
+        self._event(store, lab, "run." + state, source="simulator", run_id=run_id,
+                    outcome="success" if state == "completed" else "partial" if state == "contained" else "unknown",
+                    details=details, updates={"run:" + run_id: run},
+                    expected={"stop_requested": False} if state == "completed" else None)
+        return run
+
+    @staticmethod
+    def _artifact_name(kind, fixture_id=None):
+        if kind == "note" and fixture_id is None:
+            return "simulation-note.txt"
+        if kind not in {"staged", "received"}:
+            raise SafetyError("Unsupported generated artifact purpose")
+        validate_id(fixture_id)
+        return ("stage-" if kind == "staged" else "mock-") + fixture_id + ".bin"
+
+    def _artifact_snapshot(self, lab, path, run, pending=None):
+        if not run:
+            return []
+        records = run.get("artifacts", [])
+        if not run.get("artifacts_initialized"):
+            if records or pending:
+                raise SafetyError("Artifact records require a verified generated area")
+            return []
+        names = set()
+        with SafeDirectory(path / "artifacts" / validate_id(run["run_id"])) as directory:
+            for item in records:
+                expected_name = self._validate_artifact(lab, run, item)
+                if expected_name != item["name"] or expected_name in names:
+                    raise SafetyError("Generated artifact inventory is invalid")
+                names.add(expected_name)
+                if directory.identity(item["name"]) != item["identity"]:
+                    raise SafetyError("Generated artifact object identity changed")
+                data = directory.read(item["name"], item["size"])
+                if (len(data) != item["size"] or hash_bytes(data) != item["sha256"]
+                        or directory.identity(item["name"]) != item["identity"]):
+                    raise SafetyError("Generated artifact hash verification failed")
+            if pending:
+                record = pending["record"]
+                if record["name"] != self._validate_artifact(lab, run, record):
+                    raise SafetyError("Pending artifact name is outside its generated purpose")
+                names.add(record["name"])
+            if set(directory.names()) - names or not {item["name"] for item in records} <= set(directory.names()):
+                raise SafetyError("Unexpected objects exist in the generated artifact area")
+        return list(records)
+
+    def _validate_artifact(self, lab, run, item):
+        name = self._artifact_name(item["kind"], item["fixture_id"])
+        if run.get("lab_id") != lab["lab_id"] or run.get("baseline_id") != lab["baseline_id"]:
+            raise SafetyError("Artifact area belongs to a different experiment generation")
+        if item["kind"] == "note":
+            if run["scenario"] != "double_extortion_generated":
+                raise SafetyError("This scenario cannot create a simulation note")
+            data = simulation.note(lab["lab_id"], run["run_id"])
+            digest, size = hash_bytes(data), len(data)
+        else:
+            count = run["configuration"]["stage_count" if item["kind"] == "staged" else "receive_count"]
+            if item["fixture_id"] not in run["fixture_ids"][:count]:
+                raise SafetyError("Artifact source is outside the admitted copy selection")
+            fixture = next((row for row in lab["fixtures"] if row["id"] == item["fixture_id"]), None)
+            if fixture is None:
+                raise SafetyError("Artifact source is not a generated fixture")
+            digest, size = fixture["sha256"], fixture["size"]
+        if item["name"] != name or item["sha256"] != digest or type(item["size"]) is not int or item["size"] != size:
+            raise SafetyError("Artifact provenance differs from its generated source")
+        return name
+
+    def _write_artifact(self, lab, store, path, run, directory, kind, fixture, data):
+        self._artifact_snapshot(lab, path, run)
+        self._space(len(data) * 2)
+        record = {"kind": kind, "fixture_id": fixture["id"] if fixture else None,
+                  "name": self._artifact_name(kind, fixture["id"] if fixture else None),
+                  "size": len(data), "sha256": hash_bytes(data)}
+        self._validate_artifact(lab, run, record)
+        pending = {"kind": "artifact", "run_id": run["run_id"], "record": record}
+        self._event(store, lab, "artifact.intent", source="simulator", run_id=run["run_id"],
+                    fixture_id=record["fixture_id"], outcome="pending",
+                    details={"operation": kind, "bytes": len(data), "sha256": record["sha256"]},
+                    updates={"pending": pending}, expected={"stop_requested": False})
+        identity = directory.create(record["name"], data)
+        if (hash_bytes(directory.read(record["name"], len(data))) != record["sha256"]
+                or directory.identity(record["name"]) != identity):
+            raise SafetyError("Generated artifact write did not verify")
+        completed = {**record, "identity": identity}
+        candidate = {**run, "artifacts": run["artifacts"] + [completed]}
+        self._event(store, lab, "artifact.created", source="simulator", run_id=run["run_id"], fixture_id=record["fixture_id"],
+                    details={"operation": kind, "bytes": len(data), "sha256": record["sha256"]},
+                    updates={"pending": None, "run:" + run["run_id"]: candidate})
+        run.update(candidate)
 
     @staticmethod
     def _aad(lab, run, fixture):
         return scenarios.canonical({"version": 1, "lab_id": lab["lab_id"], "run_id": run["run_id"],
                                     "fixture_id": fixture["id"], "baseline_sha256": fixture["sha256"]})
 
-    def _mutate(self, store, lab, work, fixture, before, after, run_id, operation, *, recovery=False):
+    def _mutate(self, store, lab, work, fixture, before, after, run_id, operation, *, recovery=False, run=None):
         pending = {"fixture_id": fixture["id"], "run_id": run_id, "operation": operation,
                    "before_sha256": hash_bytes(before), "after_sha256": hash_bytes(after)}
         self._event(store, lab, "file.intent", source="response" if recovery else "simulator", outcome="pending", run_id=run_id,
@@ -630,8 +815,14 @@ class LabService:
         work.replace(fixture["name"], after, expected=fixture["identity"])
         if hash_bytes(work.read(fixture["name"], self.policy.max_file_bytes + 64)) != pending["after_sha256"]:
             raise SafetyError("Post-write verification failed")
+        updates = {"pending": None}
+        if run is not None:
+            candidate = {**run, "affected": run["affected"] + [fixture["id"]]}
+            updates["run:" + run_id] = candidate
         self._event(store, lab, "file.restored" if recovery else "file.changed", source="response" if recovery else "simulator", run_id=run_id, fixture_id=fixture["id"],
-                    details={"before_sha256": pending["before_sha256"], "after_sha256": pending["after_sha256"], "bytes": len(after)}, updates={"pending": None})
+                    details={"before_sha256": pending["before_sha256"], "after_sha256": pending["after_sha256"], "bytes": len(after)}, updates=updates)
+        if run is not None:
+            run.update(candidate)
 
     def _scan(self, lab, store, path, run_id=None, updates=None):
         observations = self._snapshot(lab, path)
@@ -684,6 +875,8 @@ class LabService:
             pending = store.get_state("pending")
             run_id = store.get_state("active_run")
             run = store.get_state("run:" + run_id) if run_id else None
+            if pending and pending.get("kind") in {"artifact", "artifact_area"}:
+                return self._reconcile_artifact(lab, store, path, run, pending)
             if not pending and (not run or run["state"] != "running"):
                 return {"state": "no_pending_operation"}
             snapshot = {item["id"]: item for item in self._snapshot(lab, path)}
@@ -696,11 +889,42 @@ class LabService:
             if recovering:
                 updates["recovery"] = {"run_id": run_id, "verified": False, "state": "failed"}
             elif run:
+                if pending and finding == "applied" and pending["fixture_id"] not in run["affected"]:
+                    run["affected"].append(pending["fixture_id"])
                 run["state"], run["ended_at"] = "interrupted", utc_now()
                 updates["run:" + run_id] = run
             self._event(store, lab, "recovery.failed" if recovering else "run.interrupted", source="response", outcome="unknown", run_id=run_id,
                         details={"reason": finding, "state": "recovery_failed" if recovering else "interrupted"}, updates=updates)
             return {"state": "recovery_failed" if recovering else "interrupted", "finding": finding, "next": "preserve_evidence_then_recover"}
+
+    def _reconcile_artifact(self, lab, store, path, run, pending):
+        if not run or pending["run_id"] != run["run_id"]:
+            raise SafetyError("Pending artifact belongs to a different run")
+        location = path / "artifacts" / validate_id(run["run_id"])
+        finding = "not_applied"
+        with SafeDirectory(path / "artifacts"):
+            if pending["kind"] == "artifact_area":
+                if location.exists():
+                    with SafeDirectory(location) as directory:
+                        if directory.names():
+                            raise SafetyError("Uncommitted artifact preparation contains unexpected files")
+                    run["artifacts_initialized"] = True
+                    finding = "empty_area_prepared"
+            else:
+                self._artifact_snapshot(lab, path, run, pending=pending)
+                record = pending["record"]
+                with SafeDirectory(location) as directory:
+                    if record["name"] in directory.names():
+                        data = directory.read(record["name"], record["size"])
+                        if len(data) != record["size"] or hash_bytes(data) != record["sha256"]:
+                            raise SafetyError("Interrupted artifact contents require offline review")
+                        run["artifacts"].append({**record, "identity": directory.identity(record["name"]), "reconciled": True})
+                        finding = "applied"
+        run.update(state="interrupted", ended_at=utc_now(), reason="artifact_" + finding)
+        self._event(store, lab, "run.interrupted", source="response", run_id=run["run_id"], outcome="unknown",
+                    details={"state": "interrupted", "reason": run["reason"]},
+                    updates={"pending": None, "arm": None, "run:" + run["run_id"]: run})
+        return {"state": "interrupted", "finding": finding, "next": "preserve_evidence_then_recover"}
 
     @staticmethod
     def _all_events(store):
@@ -719,12 +943,13 @@ class LabService:
             if store.get_state("pending") or store.get_state("active_study") or run and run["state"] == "running":
                 raise StateError("Contain or reconcile the run before preserving evidence")
             items = self._snapshot(lab, path)
+            artifacts = self._artifact_snapshot(lab, path, run)
             missing = [item["id"] for item in items if item["status"] == "missing"]
             events = scenarios.canonical(self._all_events(store))
             evidence = store.get_state("evidence", [])
             if store.count() + len(lab["fixtures"]) * 2 + 12 > self.policy.max_events:
                 raise StateError("Insufficient audit capacity for evidence and recovery")
-            required = sum(item["size"] + 64 for item in items) + len(events) + 65536
+            required = sum(item["size"] + 64 for item in items) + sum(item["size"] for item in artifacts) + len(events) + MAX_EVIDENCE_MANIFEST
             if sum(item["bytes"] for item in evidence) + required > self.policy.max_evidence_bytes:
                 raise SafetyError("Evidence retention ceiling reached; preserve the lab for review")
             self._space(required)
@@ -745,6 +970,18 @@ class LabService:
                     target.create(item["name"], data)
                     files.append({"name": item["name"], "fixture_id": item["id"], "sha256": digest, "size": len(data)})
                     total += len(data)
+                if artifacts:
+                    with SafeDirectory(path / "artifacts" / run_id) as source:
+                        for item in artifacts:
+                            if source.identity(item["name"]) != item["identity"]:
+                                raise SafetyError("Artifact identity changed during evidence acquisition")
+                            data = source.read(item["name"], item["size"])
+                            if hash_bytes(data) != item["sha256"]:
+                                raise SafetyError("Artifact changed during evidence acquisition")
+                            target.create(item["name"], data)
+                            files.append({"name": item["name"], "artifact_kind": item["kind"],
+                                          "source_fixture_id": item["fixture_id"], "sha256": item["sha256"], "size": len(data)})
+                            total += len(data)
                 target.create("events.json", events)
                 files.append({"name": "events.json", "sha256": hashlib.sha256(events).hexdigest(), "size": len(events)})
                 total += len(events)
@@ -753,6 +990,8 @@ class LabService:
                             "event_count": len(scenarios.parse_json(events, self.policy.max_evidence_bytes)), "complete": not missing,
                             "missing_fixture_ids": missing, "authenticity": "Local hashes require independent trust; not tamperproof."}
                 encoded = scenarios.canonical(manifest)
+                if len(encoded) > MAX_EVIDENCE_MANIFEST:
+                    raise SafetyError("Evidence manifest exceeds its bounded inventory ceiling")
                 target.create("manifest.json", encoded)
                 total += len(encoded)
             record = {"id": evidence_id, "run_id": run_id, "bytes": total, "sha256": hash_bytes(encoded), "created_at": manifest["collected_at"], "state": "partial" if missing else "complete"}
@@ -763,10 +1002,10 @@ class LabService:
 
     def _verify_evidence(self, path, record):
         with SafeDirectory(path / "evidence" / record["id"]) as directory:
-            encoded = directory.read("manifest.json", 65536)
+            encoded = directory.read("manifest.json", MAX_EVIDENCE_MANIFEST)
             if hash_bytes(encoded) != record["sha256"]:
                 raise SafetyError("Evidence manifest integrity failed")
-            manifest = scenarios.parse_json(encoded, 65536)
+            manifest = scenarios.parse_json(encoded, MAX_EVIDENCE_MANIFEST)
             if set(directory.names()) != {item["name"] for item in manifest["files"]} | {"manifest.json"}:
                 raise SafetyError("Evidence inventory differs from its manifest")
             for item in manifest["files"]:
@@ -854,6 +1093,15 @@ class LabService:
             result["events"] = self._all_events(store)
             result["evidence"] = store.get_state("evidence", [])
             result["crypto_studies"] = [store.get_state("study:" + study_id) for study_id in store.get_state("studies", [])]
+            result["runs"] = [store.get_state("run:" + run_id) for run_id in store.get_state("runs", [])]
+            run = result["last_run"]
+            if run:
+                result["simulation"] = {"plan_sha256": run.get("plan_sha256"), "discovered_files": len(run.get("discovered", [])),
+                                        "staged_files": sum(item["kind"] == "staged" for item in run.get("artifacts", [])),
+                                        "staged_bytes": sum(item["size"] for item in run.get("artifacts", []) if item["kind"] == "staged"),
+                                        "mock_received_files": sum(item["kind"] == "received" for item in run.get("artifacts", [])),
+                                        "mock_received_bytes": sum(item["size"] for item in run.get("artifacts", []) if item["kind"] == "received"),
+                                        "modified_files": len(run["affected"]), "external_transfer": False}
             result["schema_version"] = 1
             result["report_created_at"] = utc_now()
             result["indicators"] = [{"type": "generated_fixture_sha256", "value": item["current_sha256"], "fixture_id": item["id"], "synthetic": True}

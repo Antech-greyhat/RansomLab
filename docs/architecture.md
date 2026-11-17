@@ -35,6 +35,22 @@ same service/configuration factory. Packaging supplies the ransomlab entry point
 and optional dashboard dependencies; source-checkout editable installation keeps
 the managed root at `<checkout>/.ransomlab`.
 
+## Implemented Phase 3 simulation
+
+`scenarios.py` retains v1 envelopes and adds closed v2 pacing/copy plans, versioned
+plan hashes and verified replay lineage. `simulation.py` schedules finite discovery,
+staging, local mock receipts, fixed impact and inert notes through capabilities
+admitted by `LabService`. Primitive modification/encryption requests remain valid.
+
+The shared service reserves artifact capacity before one-use admission, creates
+a per-run generated flat area, verifies each source/copy identity and hash, and
+commits results with the audit event. Pending area/file intents survive failures;
+reconciliation verifies actual artifacts and refuses ambiguous contents. Evidence
+captures work, stage/mock copies, notes and events with distinct source-fixture
+metadata, so artifact hashes cannot overwrite working baselines during recovery.
+Reports and CLI history use the same committed records. Independent file observers
+and staging/detection rules remain Phase 4/5 work.
+
 ## Architectural decisions
 
 Use a modular Python application with one shared service layer, SQLite authority,

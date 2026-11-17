@@ -12,6 +12,7 @@ Use the command line to manage experiments and a local dashboard to explore resu
 - Create, validate, inspect, and close persistent experiment records.
 - Generate bounded synthetic datasets with SHA-256 baselines and clean recovery copies.
 - Run controlled file-modification and authenticated-encryption scenarios.
+- Trace generated discovery, staging, local mock receipts and inert simulation notes.
 - Measure SHA-256, AES-GCM, RSA-OAEP key wrapping and Ed25519 signatures on synthetic data.
 - Observe changed or missing files and investigate integrity alerts.
 - Preserve evidence and export incident timelines as JSON, JSONL, or Markdown.
@@ -96,9 +97,31 @@ only stages a request and execution consumes its authorization once.
 | --- | --- |
 | `modify_generated` | Applies a fixed content change to selected generated working files |
 | `encrypt_generated` | Applies authenticated AES-256-GCM encryption to selected generated working files |
+| `double_extortion_generated` | Discovers generated files, stages bounded copies, verifies local mock receipts, modifies working files and creates an inert note |
+| `benign_copy_generated` | Uses the same generated discovery and local copying stages without working-file impact |
 
 These examples use Bash redirection. For Windows PowerShell 5.1, use explicit
 ASCII encoding when saving scenario JSON; see the [operator guide](docs/usage.md).
+
+To run a multistage experiment, create a new generated lab, then prepare its plan:
+
+```bash
+ransomlab lab create --name "Staging and impact study" --count 12 --size 4096
+ransomlab scenario create LAB_ID double_extortion_generated --count 12 --stage-count 6 --receive-count 4 --interval-ms 50 > scenario.json
+ransomlab scenario import scenario.json
+ransomlab lab arm LAB_ID --snapshot clean-baseline --isolated --disposable
+ransomlab simulate LAB_ID REQUEST_ID
+ransomlab scenario history LAB_ID
+```
+
+Staging and mock receipts are verified copies inside the generated experiment;
+the mock destination has no network service or configurable address. Preserve
+evidence and recover before reusing the lab. `scenario replay LAB_ID REQUEST_ID`
+reissues the saved plan with a fresh request; import and arm it again to execute.
+Use `--interval-ms 50` with `modify_generated` for a paced rapid-change trial,
+or `2000` for a slower comparison. See the
+[multistage reference](docs/usage.md#multistage-scenarios-and-replay) for quotas,
+interruption handling and the benign control.
 
 ## Study cryptographic behaviour
 

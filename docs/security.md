@@ -49,15 +49,25 @@ decoys. No destructive operations beyond generated disposable data.
 | Symlink, junction, hard-link or ancestor replacement | No-follow opens, regular-file and single-link checks, retained identities/handles, revalidation | Native races and all supported filesystems still require acceptance |
 | Foreign workspace adoption or manifest replacement | Exclusive generated directory creation; registry ownership and generation; authenticated manifest | Existing HMAC/inventory checks; same-account key replacement outside trust guarantee |
 | Replay, stale approval or cross-experiment targeting | Single-use expiring authority bound to experiment, baseline, scenario/config and policy | Existing request expiry/consumption; stronger authorization binding is Phase 1 work |
-| Disk, event or staging exhaustion | Admission and per-operation quotas, recovery reserve, bounded parsing | Existing partial quotas; staging/mock/global aggregate budgets planned |
+| Disk, event or staging exhaustion | Admission and per-operation quotas, recovery reserve, bounded parsing | Phase 3 reserves aggregate per-lab staging/mock bytes and file counts before execution; free space is rechecked at writes |
 | Crash between file and database changes | Durable intent before I/O, verified result after, explicit interrupted state/reconciliation | Memory failure tests exist; native crash/sidecar recovery unresolved |
 | Backup/key/evidence modification by scenario | Capability separation; no scenario write handle to those stores; baseline verification | Current logical separation; narrow capabilities and native permission tests planned |
-| Covert real upload through mock transfer | Filesystem-only internal sink, no address or networking configuration | No sink exists yet; reject URL/path/socket options and verify no network access in Phase 3 |
+| Covert real upload through mock transfer | Filesystem-only internal sink, no address or networking configuration | Phase 3 uses fixed generated mock filenames; closed plan validation rejects destinations and socket-blocking tests cover execution |
 | Fabricated detection or optimistic recovery | Observations separate from intents/labels; attributable alerts; full hash verification | Existing hashes/count rules; measured evaluation and missing-file restoration incomplete |
 | Browser access or credential leakage | Loopback, session/token access, Host/Origin checks, escaping, bounded read-only routes | Existing tests pass; fresh server/dependency assurance pending |
 | Evidence tampering | Bounded manifest, hashes, provenance, trusted comparison source and explicit partial status | Local hashes are not authenticity or legal admissibility proof |
 
 ## Workspace and operation admission
+
+Phase 3 artifact writes use exclusively created per-run areas beneath a new
+generated lab's `artifacts` root. Stage/mock/note names and source fixture IDs are
+fixed by admitted purpose and selection. Every copy is preceded by a durable
+intent and followed by hash/identity verification and an atomic result transaction.
+Interrupted copies count only after verified reconciliation; corrupted pending
+objects keep their unresolved state. No scenario can write clean copies, keys or
+preserved evidence. Artifact reservations persist across interrupted attempts and
+are capped independently of the existing evidence/database ceilings. Native VM
+acceptance remains pending; memory fixtures do not establish filesystem containment.
 
 Before any effectful operation, the shared service must:
 

@@ -100,6 +100,25 @@ class NativeVmAcceptanceTests(unittest.TestCase):
         self.assertEqual({"intact"}, {item["status"] for item in result["fixtures"]})
         self.assertEqual(baseline, hashlib.sha256(decoy.read_bytes()).hexdigest())
 
+    def test_native_multistage_artifacts_evidence_and_recovery(self):
+        decoy, baseline = self._decoy()
+        lab, request = self._create_and_stage("double_extortion_generated")
+        run = self.service.simulate(lab["lab_id"], request["request_id"])
+        self.assertEqual("completed", run["state"])
+        self.assertEqual(4, len(run["discovered"]))
+        self.assertEqual(9, len(run["artifacts"]))
+        with SafeDirectory(self.service.root / lab["lab_id"] / "artifacts" / run["run_id"]) as directory:
+            for item in run["artifacts"]:
+                data = directory.read(item["name"], item["size"])
+                self.assertEqual(item["sha256"], hashlib.sha256(data).hexdigest())
+                self.assertEqual(item["identity"], directory.identity(item["name"]))
+        evidence = self.service.preserve(lab["lab_id"])
+        with self.service._open(lab["lab_id"], readonly=True) as (_, __, path):
+            manifest = self.service._verify_evidence(path, evidence)
+        self.assertEqual(9, sum("artifact_kind" in item for item in manifest["files"]))
+        self.assertTrue(self.service.recover(lab["lab_id"])["verified"])
+        self.assertEqual(baseline, hashlib.sha256(decoy.read_bytes()).hexdigest())
+
     @unittest.skipUnless(os.name == "nt", "Native Microsoft CNG exercise is Windows-only")
     def test_native_authenticated_encryption_and_decrypt_recovery(self):
         decoy, baseline = self._decoy()
