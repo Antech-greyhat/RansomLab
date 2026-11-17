@@ -1,8 +1,9 @@
 # Research scenario catalogue
 
-Phase 0 design, 2026-11-11. All six specifications below are proposed studies,
-not newly available commands. The existing engine accepts only
-`encrypt_generated` and `modify_generated`; [README](../README.md) documents them.
+The catalogue began as the Phase 0 design on 2026-11-11. Phase 2 implements the
+cryptography study and Phase 3 implements controlled multistage execution.
+The remaining observer, detection and recovery specifications identify later
+phase work. [README](../README.md) documents currently available commands.
 
 ## Shared study protocol
 
@@ -41,8 +42,9 @@ defines scoring and [security](security.md) applies to every step.
 | Evaluation metrics | Bytes/time and per-operation samples; round-trip/signature outcomes; detector results only if observers/rules are available |
 | Safety boundaries | Established providers, bounded bytes, no arbitrary paths, no hardcoded operational keys/nonces, no private keys in reports |
 
-Existing CNG/SHA-256 vectors are reusable; asymmetric/signature studies and
-persisted experiment timings are not implemented.
+Phase 2 provides measured SHA-256/AES-GCM/RSA-OAEP/Ed25519 studies through
+`crypto study`; its memory round trips leave working fixtures intact. The separate
+`encrypt_generated` scenario demonstrates bounded file ciphertext and restoration.
 
 ## S2 — Suspicious bulk file modification
 
@@ -59,7 +61,9 @@ persisted experiment timings are not implemented.
 | Safety boundaries | Fixed markers on generated IDs only; bounded iterations/time; no unrelated process termination or encryption outside the work inventory |
 
 Existing `modify_generated` provides a primitive; its current three-file count
-alert does not implement the proposed timing rule. Thresholds are study inputs,
+alert does not implement the proposed timing rule. Phase 3's versioned plans add
+`--interval-ms 50` and `--interval-ms 2000` pacing with containment checkpoints.
+Thresholds are study inputs,
 not efficacy claims.
 
 ## S3 — Canary-file detection
@@ -96,6 +100,15 @@ service. A benign control performs approved generated backup-like copies; detect
 must explain any false positives. Preventive trials lower the staging budget or
 stop on alert; they never weaken mandatory safety gates. Partial transfers retain
 partial status and cannot be counted as full exposure.
+
+Phase 3 implements this sequence as `double_extortion_generated`, with the paired
+`benign_copy_generated` control, selected generated IDs, staging/receipt limits,
+inert notes, durable intents/results and replay. Artifact reservations bound
+retention; verified receipts remain local filesystem copies. Evidence captures
+the artifacts and recovery retains them while restoring work. Synthetic labels
+are deterministic generator metadata. Class-filter authoring, independent staging
+observers and detector scoring remain later work; see the
+[implemented workflow](usage.md#multistage-scenarios-and-replay).
 
 ## S5 — Backup and recovery resilience
 

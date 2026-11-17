@@ -37,6 +37,7 @@ That command reports an explicit skip because no runner attestation was supplied
 | --- | --- | --- |
 | Modify → detect → preserve → recover | Real generated fixture files, real guarded writes, SQLite intents/results, alerts, evidence and clean-copy recovery | All expected hashes restored; generated external decoy unchanged; report truthfully verifies recovery |
 | Encrypt → preserve → decrypt on Windows | Real CNG encryption of generated fixture files; verified evidence and authenticated decryption recovery | Complete round trip; key files absent from evidence inventory; external decoy unchanged |
+| Multistage → preserve → recover | Native generated discovery, stage/mock copies, inert note, guarded identities/hashes and artifact-inclusive evidence | Four discoveries, nine verified artifacts, complete clean recovery and unchanged external decoy |
 | Hardlink boundary | Hardlink under a generated guarded directory to a sacrificial decoy elsewhere in the enclosing test directory | Read and write through the alias rejected before impact; decoy hash unchanged |
 | Windows held-directory rename | Rename attempt while guarded ancestor handles are open, followed by an ordinary rename after close | Held rename denied; bytes and identities remain stable; post-close rename succeeds to rule out a blanket permission failure |
 
@@ -54,4 +55,4 @@ The runner prints verbose test results plus a JSON summary containing scope, run
 
 For supported Windows execution, hardlink or ordinary-rename permission failures must remain blocked/errors; do not change expectations or skip those cases to get a green result. Fix the disposable test environment or narrow support through explicit owner review. A Windows-only test skipped on Linux does not establish Windows acceptance.
 
-Before declaring home-lab deployment complete, attach the actual run output, independently checked isolation/snapshot evidence, and recovery results. These four cases complement rather than replace the broader unit, fault-injection, regression and operating-system boundary suites. They do not prove freedom from all races, power-loss failures, provider defects or same-account/admin tampering.
+Before declaring home-lab deployment complete, attach the actual run output, independently checked isolation/snapshot evidence, and recovery results. These cases complement rather than replace the broader unit, fault-injection, regression and operating-system boundary suites. They do not prove freedom from all races, power-loss failures, provider defects or same-account/admin tampering.

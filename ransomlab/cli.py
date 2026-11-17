@@ -52,6 +52,14 @@ def parser():
         command.add_argument(target)
         command.add_argument("scenario", choices=tuple(scenarios.SCENARIOS))
         command.add_argument("--count", type=int)
+        command.add_argument("--interval-ms", type=int, help="Pace actions by 0-2000 milliseconds")
+        command.add_argument("--stage-count", type=int, help="Maximum generated staging copies")
+        command.add_argument("--receive-count", type=int, help="Maximum verified local mock receipts")
+    replay = scenario.add_parser("replay", help="Reissue an imported plan with fresh authorization identifiers")
+    replay.add_argument("lab_id")
+    replay.add_argument("request_id")
+    history = scenario.add_parser("history", help="Read recorded run configurations and results")
+    history.add_argument("lab_id")
     importing = scenario.add_parser("import", help="Validate and stage only; never execute on import")
     importing.add_argument("file")
     sim = commands.add_parser("simulate", help="Run a staged fixed action on generated fixtures in an armed VM")
@@ -128,6 +136,13 @@ def markdown_report(report):
             "| Sequence | UTC time | Source | Event | Outcome |", "| --- | --- | --- | --- | --- |"]
     for event in report["events"]:
         rows.append(f"| {event['sequence']} | {event['created_at']} | {event['source']} | {event['kind']} | {event['outcome']} |")
+    if report.get("simulation"):
+        result = report["simulation"]
+        rows += ["", "## Behaviour simulation", "", f"Plan SHA-256: {result['plan_sha256']}", "",
+                 "| Discovery | Staging | Local mock receipts | Modified files |",
+                 "| --- | --- | --- | --- |",
+                 f"| {result['discovered_files']} files | {result['staged_files']} files / {result['staged_bytes']} bytes | {result['mock_received_files']} files / {result['mock_received_bytes']} bytes | {result['modified_files']} |",
+                 "", "Mock receipts verify generated filesystem copies within this experiment."]
     if report.get("crypto_studies"):
         rows += ["", "## Cryptography studies", "",
                  "| Study | State | Completed / planned samples | Symmetric provider |",
@@ -165,7 +180,8 @@ def main(argv=None, service=None):
             serve(args.port, service=service)
             return 0
         elif args.command == "scenario" and args.action == "compose":
-            value = scenarios.create(scenarios.descriptor(_read_document(args.descriptor_file)), args.scenario, args.count)
+            value = scenarios.create(scenarios.descriptor(_read_document(args.descriptor_file)), args.scenario, args.count,
+                                     **_scenario_options(args))
         else:
             if service is None:
                 from .services import LabService
@@ -188,9 +204,13 @@ def main(argv=None, service=None):
                     value = service.arm(args.lab_id, args.snapshot, args.isolated, args.disposable)
             elif args.command == "scenario":
                 if args.action == "create":
-                    value = service.create_scenario(args.lab_id, args.scenario, args.count)
+                    value = service.create_scenario(args.lab_id, args.scenario, args.count, **_scenario_options(args))
                 elif args.action == "describe":
                     value = service.descriptor(args.lab_id)
+                elif args.action == "replay":
+                    value = service.replay_scenario(args.lab_id, args.request_id)
+                elif args.action == "history":
+                    value = service.run_history(args.lab_id)
                 else:
                     value = service.import_scenario(_read_document(args.file))
             elif args.command == "simulate":
@@ -239,3 +259,8 @@ def main(argv=None, service=None):
     except KeyboardInterrupt:
         print(json.dumps({"error": {"type": "Interrupted", "message": "Operation interrupted; reconcile any active lab"}}), file=sys.stderr)
         return 130
+
+
+def _scenario_options(args):
+    return {name: getattr(args, name) for name in ("interval_ms", "stage_count", "receive_count")
+            if getattr(args, name) is not None}
