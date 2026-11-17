@@ -16,7 +16,7 @@ import shutil
 import time
 from uuid import uuid4, uuid5, UUID
 
-from . import crypto, environment, scenarios
+from . import crypto, environment, research, scenarios
 from .core.config import AppConfig, Policy
 from .core.errors import LabError, SafetyError, StateError, ValidationError
 from .core.events import Event, utc_now, validate_id
@@ -150,7 +150,8 @@ class LabService:
 
     def _event(self, store, lab, kind, *, updates=None, expected=None, **values):
         protected = {"file.intent", "file.changed", "file.restored", "run.completed", "run.contained", "run.interrupted",
-                     "recovery.started", "recovery.verified", "recovery.failed", "evidence.started", "evidence.preserved", "containment.requested", "experiment.closed"}
+                     "recovery.started", "recovery.verified", "recovery.failed", "evidence.started", "evidence.preserved", "containment.requested", "experiment.closed",
+                     "crypto.completed", "crypto.contained", "crypto.interrupted"}
         reserve = len(lab["fixtures"]) * 3 + 16
         if kind not in protected and store.count() + reserve + 1 > self.policy.max_events:
             raise StateError("Audit capacity is reserved for containment, evidence and recovery")
@@ -253,6 +254,8 @@ class LabService:
             return record["state"]
         if store.get_state("pending"):
             return "reconciliation_required"
+        if store.get_state("active_study"):
+            return "crypto_running"
         if store.get_state("arm"):
             return "armed"
         if run and recovery and recovery.get("run_id") == run["run_id"] and recovery.get("verified"):
@@ -293,6 +296,7 @@ class LabService:
                     "state": self._state(store, run, recovery), "fixture_count": lab["fixture_count"], "bytes_total": lab["bytes_total"],
                     "experiment": self._experiment_record(lab, store).to_dict(),
                     "last_run": run, "recovery": recovery, "alerts": store.get_state("alerts", []),
+                    "active_study": store.get_state("active_study"),
                     "events": [event.to_dict() for event in store.events(limit=200, after=max(0, total - 200))],
                     "event_count": total, "fixtures": self._snapshot(lab, path),
                     "machines": [{"name": "Windows 11", "role": "Fixture execution and defence", "status": "declared"},
@@ -323,7 +327,7 @@ class LabService:
         run_id = store.get_state("active_run")
         run = store.get_state("run:" + run_id) if run_id else None
         recovery = store.get_state("recovery")
-        if (store.get_state("pending") or run and run["state"] == "running"
+        if (store.get_state("pending") or store.get_state("active_study") or run and run["state"] == "running"
                 or recovery and recovery.get("state") == "recovering"):
             raise StateError("Contain or reconcile active work before changing the experiment lifecycle")
 
@@ -400,6 +404,7 @@ class LabService:
             return {"lab_id": lab_id, "state": "armed", "expires_at": arm["expires_at"]}
 
     def _ready(self, lab, store, path):
+        self._require_idle(store)
         record = self._experiment_record(lab, store)
         if record.state != ExperimentState.READY or not lab["fixtures"]:
             raise StateError("A validated experiment with generated fixtures is required")
@@ -422,6 +427,117 @@ class LabService:
             for fixture in lab["fixtures"]:
                 if clean.identity(fixture["name"]) != fixture["clean_identity"] or hash_bytes(clean.read(fixture["name"], fixture["size"])) != fixture["sha256"]:
                     raise SafetyError("A clean recovery copy failed verification")
+
+    def crypto_study(self, lab_id: str, count: int = 3, repetitions: int = 3,
+                     sizes: tuple[int, ...] = ()) -> dict:
+        """Measure RAM copies of registered fixtures using one locally armed session."""
+        plan = research.StudyPlan(count, repetitions, sizes)
+        with self._open(lab_id, lease=True) as (lab, store, path):
+            self._ready(lab, store, path)
+            if count > len(lab["fixtures"]) or plan.sample_count > self.policy.max_actions:
+                raise ValidationError("Study exceeds the available fixtures or action ceiling")
+            fixtures = lab["fixtures"][:count]
+            if sizes and any(sizes[-1] > item["size"] for item in fixtures):
+                raise ValidationError("Study payload sizes must fit every selected generated fixture")
+            studies = store.get_state("studies", [])
+            if len(studies) >= MAX_RUNS:
+                raise SafetyError("Cryptography study retention ceiling reached")
+            if store.count() + plan.sample_count + len(lab["fixtures"]) * 3 + 50 > self.policy.max_events:
+                raise SafetyError("Insufficient audit capacity for the study and recovery reserve")
+            arm = store.get_state("arm")
+            if not arm or arm["baseline_id"] != lab["baseline_id"] or datetime.fromisoformat(arm["expires_at"]) <= datetime.now(timezone.utc):
+                raise SafetyError("A current locally armed session is required")
+            environment.require_guest(arm["attestation"])
+            provider = research.providers()
+            study_id = str(uuid4())
+            study = {"schema_version": 1, "study_id": study_id, "lab_id": lab_id,
+                     "baseline_id": lab["baseline_id"], "generator": lab["generator"],
+                     "state": "running", "started_at": utc_now(), "ended_at": None,
+                     "providers": provider, "attestation": arm["attestation"],
+                     "policy": self.policy.to_dict(),
+                     "configuration": {"fixture_ids": [item["id"] for item in fixtures],
+                                       "repetitions": repetitions, "sizes": list(sizes),
+                                       "planned_samples": plan.sample_count},
+                     "public_keys": None, "samples": [], "summary": research.summarize([])}
+            self._event(store, lab, "crypto.started", source="operator", outcome="pending",
+                        details={"study_id": study_id, "count": plan.sample_count, "state": "running"},
+                        updates={"study:" + study_id: study, "studies": studies + [study_id],
+                                 "active_study": study_id, "arm": None},
+                        expected={"arm": arm, "stop_requested": False, "active_study": None})
+            started = time.monotonic()
+
+            def checkpoint():
+                if store.get_state("stop_requested"):
+                    raise research.StudyStopped("operator_requested")
+                if time.monotonic() - started >= self.policy.max_run_seconds:
+                    raise research.StudyStopped("deadline_reached")
+
+            session = None
+            try:
+                session = research.CryptoSession(checkpoint)
+                study["public_keys"] = session.public
+                self._event(store, lab, "crypto.keys_ready", details={"study_id": study_id, "state": "running"},
+                            updates={"study:" + study_id: study}, expected={"stop_requested": False})
+                with SafeDirectory(path / "work") as work:
+                    for fixture in fixtures:
+                        for size in sizes or (fixture["size"],):
+                            for repetition in range(1, repetitions + 1):
+                                checkpoint()
+                                if work.identity(fixture["name"]) != fixture["identity"]:
+                                    raise SafetyError("Generated fixture object identity has changed")
+                                data = work.read(fixture["name"], fixture["size"])
+                                if hash_bytes(data) != fixture["sha256"]:
+                                    raise SafetyError("Study fixture no longer matches its baseline")
+                                payload = data[:size]
+                                context = {"schema_version": 1, "lab_id": lab_id, "baseline_id": lab["baseline_id"],
+                                           "study_id": study_id, "fixture_id": fixture["id"],
+                                           "repetition": repetition, "plaintext_bytes": size,
+                                           "baseline_sha256": fixture["sha256"], "plaintext_sha256": hash_bytes(payload)}
+                                sample = session.sample(payload, scenarios.canonical(context))
+                                sample["signed_context"] = context
+                                candidate = {**study, "samples": study["samples"] + [sample]}
+                                candidate["summary"] = research.summarize(candidate["samples"])
+                                checkpoint()
+                                self._event(store, lab, "crypto.sample", fixture_id=fixture["id"],
+                                            details={"study_id": study_id, "count": len(candidate["samples"]),
+                                                     "bytes": size, "sha256": hash_bytes(scenarios.canonical(sample))},
+                                            updates={"study:" + study_id: candidate}, expected={"stop_requested": False})
+                                study = candidate
+                self._verify_baseline(lab, path)
+                checkpoint()
+                return self._finish_study(lab, store, study_id, "completed")
+            except research.StudyStopped as exc:
+                return self._finish_study(lab, store, study_id, "contained", str(exc))
+            except (Exception, KeyboardInterrupt) as exc:
+                if isinstance(exc, StateError) and store.get_state("stop_requested"):
+                    return self._finish_study(lab, store, study_id, "contained", "operator_requested")
+                # Reload committed samples: a failed sample transaction is never a result.
+                try:
+                    self._finish_study(lab, store, study_id, "interrupted", "operation_failed")
+                except (LabError, OSError):
+                    pass
+                raise
+            finally:
+                if session is not None:
+                    session.close()
+                session = None
+
+    def _finish_study(self, lab, store, study_id, state, reason=None):
+        study = store.get_state("study:" + study_id)
+        study.update(state=state, ended_at=utc_now())
+        details = {"study_id": study_id, "count": len(study["samples"]), "state": state}
+        if reason:
+            study["reason"] = reason
+            details["reason"] = reason
+        self._event(store, lab, "crypto." + state,
+                    outcome="success" if state == "completed" else "partial" if state == "contained" else "unknown",
+                    details=details, updates={"study:" + study_id: study, "active_study": None},
+                    expected={"active_study": study_id, **({"stop_requested": False} if state == "completed" else {})})
+        return study
+
+    def crypto_studies(self, lab_id: str) -> list[dict]:
+        with self._open(lab_id, readonly=True) as (_, store, __):
+            return [store.get_state("study:" + study_id) for study_id in store.get_state("studies", [])]
 
     def simulate(self, lab_id, request_id):
         validate_id(request_id)
@@ -562,6 +678,9 @@ class LabService:
 
     def reconcile(self, lab_id):
         with self._open(lab_id, lease=True) as (lab, store, path):
+            study_id = store.get_state("active_study")
+            if study_id:
+                return self._finish_study(lab, store, study_id, "interrupted", "worker_ended")
             pending = store.get_state("pending")
             run_id = store.get_state("active_run")
             run = store.get_state("run:" + run_id) if run_id else None
@@ -597,7 +716,7 @@ class LabService:
         with self._open(lab_id, lease=True) as (lab, store, path):
             run_id = store.get_state("active_run")
             run = store.get_state("run:" + run_id) if run_id else None
-            if store.get_state("pending") or run and run["state"] == "running":
+            if store.get_state("pending") or store.get_state("active_study") or run and run["state"] == "running":
                 raise StateError("Contain or reconcile the run before preserving evidence")
             items = self._snapshot(lab, path)
             missing = [item["id"] for item in items if item["status"] == "missing"]
@@ -663,7 +782,7 @@ class LabService:
             stop_before = store.get_state("stop_requested")
             run_id = store.get_state("active_run")
             run = store.get_state("run:" + run_id) if run_id else None
-            if not run or run["state"] == "running" or store.get_state("pending"):
+            if not run or run["state"] == "running" or store.get_state("pending") or store.get_state("active_study"):
                 raise StateError("A completed, contained or reconciled run is required for recovery")
             environment.require_guest(run["attestation"])
             historical = store.get_state("recovery")
@@ -734,6 +853,7 @@ class LabService:
         with self._open(lab_id, readonly=True) as (lab, store, path):
             result["events"] = self._all_events(store)
             result["evidence"] = store.get_state("evidence", [])
+            result["crypto_studies"] = [store.get_state("study:" + study_id) for study_id in store.get_state("studies", [])]
             result["schema_version"] = 1
             result["report_created_at"] = utc_now()
             result["indicators"] = [{"type": "generated_fixture_sha256", "value": item["current_sha256"], "fixture_id": item["id"], "synthetic": True}

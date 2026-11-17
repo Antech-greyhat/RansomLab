@@ -3,6 +3,77 @@
 The [README](../README.md) is the quick start. This reference covers configuration,
 experiment records, and the generated-data workflow in an approved disposable lab.
 
+## Cryptography studies
+
+Install [the cryptography requirements](installation.md#cryptography-dependencies).
+Create generated fixtures and arm the lab using an existing clean snapshot and
+verified isolated, disposable VMware guest. Study execution repeats the guest and
+non-elevated identity checks and consumes the arming atomically with its start event.
+
+```bash
+ransomlab lab create --name "Cryptography study" --count 3 --size 4096
+ransomlab lab arm LAB_ID --snapshot clean-baseline --isolated --disposable
+ransomlab crypto study LAB_ID --count 3 --repetitions 3 --sizes 64 1024 4096
+ransomlab crypto list LAB_ID
+ransomlab report LAB_ID --format json
+ransomlab report LAB_ID --format markdown
+```
+
+The study reads only registered generated fixture objects after checking the
+manifest, complete working baseline and clean copies. Each payload is a prefix
+of its fixture; omitting `--sizes` uses the full fixture. Working files and clean
+copies remain intact. The separate `encrypt_generated` scenario demonstrates
+bounded disk ciphertext and authenticated restoration through the existing workflow.
+
+Plans allow 1–100 files, 1–10 repetitions and up to eight strictly increasing
+positive payload sizes that fit every selected fixture. The saved resource policy
+still applies: at most 100 samples by default, 300 seconds checked between bounded
+operations, available audit capacity with recovery reserve, and 20 retained studies.
+Re-arm before each new study. No arbitrary paths, algorithms or keys are accepted.
+
+Each verified sample measures SHA-256, RSA-2048-OAEP-SHA256 wrapping/unwrapping of
+a fresh 256-bit AES key, AES-256-GCM encryption/decryption with a fresh 96-bit nonce,
+and Ed25519 signing/verification. The context binds the lab, baseline, study,
+fixture, repetition, payload size and hashes. Negative checks reject modified
+ciphertext, a foreign OAEP context and a modified signed context using RAM copies.
+
+JSON results include individual nanosecond timings, total/minimum/maximum/median
+durations, and plaintext bytes per second for hashing and AES. Timings exclude
+fixture I/O, persistence and negative checks; they include adapter overhead and
+are local observations, not production throughput estimates. Zero-duration clocks
+produce a null rate. Key-generation timings are separate. Provider/runtime versions,
+platform, policy, selected fixtures and baseline identifiers support repeatable
+inputs; random ciphertext, signature keys and timings differ between studies.
+
+Only public signature material, hashes, counts and timings are persisted. Private
+RSA/Ed25519 keys, AES keys, nonces, wrapped keys, plaintext and ciphertext are not
+included in study results. Python/provider memory cannot be guaranteed erased.
+The public Ed25519 signature verifies each canonical `signed_context`:
+
+```python
+from ransomlab import research, scenarios
+
+public = bytes.fromhex(study["public_keys"]["ed25519_public_hex"])
+sample = study["samples"][0]
+assert research.verify_signature(
+    public, bytes.fromhex(sample["signature_hex"]),
+    scenarios.canonical(sample["signed_context"]),
+)
+```
+
+This is an educational context signature. It does not authenticate all timings or
+prove authorship, and a public key supplied in the same report needs independent
+trust. Audit sample hashes bind the complete recorded sample to its journal event.
+
+`contain LAB_ID` stops a study at checkpoints; `contained` results retain only
+committed samples. Operational failures record `interrupted` when the journal is
+available. A failed terminal write leaves `active_study` set and blocks arming,
+validation, closure, evidence preservation, recovery and execution until the
+stopped worker is reconciled with
+`reconcile LAB_ID`. Reconciliation preserves committed samples and marks the study
+interrupted; it does not resume keys or fabricate missing measurements. Command
+success means a result was returned; inspect its `state` for completion.
+
 ## Configuration and experiment records
 
 Use `ransomlab` after installing the package, or `python -m ransomlab` from the

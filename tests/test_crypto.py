@@ -2,8 +2,12 @@
 import os
 import unittest
 import ctypes
+import builtins
+import importlib.util
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from ransomlab import crypto
 from ransomlab.crypto import MAX_PLAINTEXT, decrypt, encrypt, provider_name
 from ransomlab.core.errors import DependencyError, LabError, SafetyError, ValidationError
 
@@ -169,6 +173,78 @@ class CryptoTests(unittest.TestCase):
                      (b"sample", bytes(32), bytes(12), None)):
             with self.assertRaises(ValidationError):
                 encrypt(*args)
+
+
+@unittest.skipUnless(importlib.util.find_spec("cryptography") is not None, "Install requirements-crypto.txt for the portable provider")
+class PortableCryptoTests(unittest.TestCase):
+    def setUp(self):
+        selected = patch("ransomlab.crypto.os", SimpleNamespace(name="posix"))
+        selected.start()
+        self.addCleanup(selected.stop)
+
+    def test_nist_aes256_gcm_vector(self):
+        result = encrypt(bytes(16), bytes(32), bytes(12), b"")
+        self.assertEqual(result.hex(), "cea7403d4d606b6e074ec5d3baf39d18d0d1c8a799996bf0265b98b5d48ab919")
+        self.assertEqual(decrypt(result, bytes(32), bytes(12), b""), bytes(16))
+        self.assertEqual(provider_name(), "cryptography AES-256-GCM")
+
+    def test_known_answer_with_aad_and_partial_block(self):
+        key = bytes.fromhex("feffe9928665731c6d6a8f9467308308" * 2)
+        nonce = bytes.fromhex("cafebabefacedbaddecaf888")
+        aad = bytes.fromhex("feedfacedeadbeeffeedfacedeadbeefabaddad2")
+        data = bytes.fromhex("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"
+                             "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39")
+        expected = bytes.fromhex("522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa"
+                                 "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66276fc6ece0f4e1768cddf8853bb2d551b")
+        self.assertEqual(encrypt(data, key, nonce, aad), expected)
+        self.assertEqual(decrypt(expected, key, nonce, aad), data)
+
+    def test_empty_binary_and_maximum_payload_roundtrips(self):
+        for data, aad in ((b"", b""), (bytes(range(256)), b"synthetic-context"),
+                          (b"x" * MAX_PLAINTEXT, b"a" * 8192)):
+            result = encrypt(data, bytes(32), bytes(12), aad)
+            self.assertEqual(decrypt(result, bytes(32), bytes(12), aad), data)
+
+    def test_tampering_key_nonce_and_context_are_authentication_errors(self):
+        result = encrypt(b"generated fixture", bytes(32), bytes(12), b"study-context")
+        for data, key, nonce, aad in (
+                (bytes([result[0] ^ 1]) + result[1:], bytes(32), bytes(12), b"study-context"),
+                (result[:-1], bytes(32), bytes(12), b"study-context"),
+                (result[:-1] + bytes([result[-1] ^ 1]), bytes(32), bytes(12), b"study-context"),
+                (result, bytes([1]) * 32, bytes(12), b"study-context"),
+                (result, bytes(32), bytes([1]) * 12, b"study-context"),
+                (result, bytes(32), bytes(12), b"foreign-context")):
+            with self.assertRaises(SafetyError):
+                decrypt(data, key, nonce, aad)
+
+    def test_invalid_inputs_fail_before_provider_call(self):
+        for args in ((b"x", b"short", bytes(12), b""), (b"x", bytes(32), b"short", b""),
+                     (b"x", bytes(32), bytes(12), b"a" * 8193),
+                     (b"x" * (MAX_PLAINTEXT + 1), bytes(32), bytes(12), b""),
+                     ("x", bytes(32), bytes(12), b""), (b"x", bytearray(32), bytes(12), b"")):
+            with patch("ransomlab.crypto._crypt") as provider, self.assertRaises(ValidationError):
+                encrypt(*args)
+            provider.assert_not_called()
+
+    def test_missing_portable_provider_fails_closed(self):
+        original = builtins.__import__
+
+        def missing(name, *args, **kwargs):
+            if name.startswith("cryptography"):
+                raise ImportError("synthetic missing dependency")
+            return original(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=missing), self.assertRaises(DependencyError):
+            encrypt(b"generated", bytes(32), bytes(12), b"")
+
+    @unittest.skipUnless(os.name == "nt", "CNG interoperability requires Windows")
+    def test_portable_and_cng_ciphertexts_are_interoperable(self):
+        data, key, nonce, aad = bytes(range(256)), bytes(range(32)), bytes(range(12)), b"generated-fixture"
+        portable = encrypt(data, key, nonce, aad)
+        native = crypto._windows_gcm(data, key, nonce, aad, False)
+        self.assertEqual(portable, native)
+        self.assertEqual(crypto._windows_gcm(portable, key, nonce, aad, True), data)
+        self.assertEqual(decrypt(native, key, nonce, aad), data)
 
 
 if __name__ == "__main__":

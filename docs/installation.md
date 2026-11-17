@@ -30,10 +30,22 @@ The constraints file fixes the inherited dependency set; it is not a current
 vulnerability or artifact-provenance attestation. See
 [dependency decisions](implementation/dependencies.md) for maintenance limits.
 
-Windows authenticated encryption uses the operating-system CNG provider.
-Non-Windows encryption requires the optional cryptography provider, which is not
-installed by the core or dashboard extra. Missing providers fail explicitly.
-Metadata management, configuration and offline scenario composition do not need it.
+## Cryptography dependencies
+
+```bash
+python -m pip install --require-hashes -r requirements-crypto.txt
+python -m pip install -e ".[crypto]"
+```
+
+The wheel-only requirements pin cryptography 50.0.2, cffi 2.1.1 and pycparser 3.12
+with official PyPI artifact hashes for CPython 3.13/3.14 on Windows x64 and glibc
+Linux x86_64. Other architectures and source builds require a separate reviewed
+manifest. See [dependency decisions](implementation/dependencies.md#phase-2-cryptography-dependencies--2026-11-17).
+
+Windows AES-GCM retains the operating-system CNG provider; non-Windows AES-GCM
+uses cryptography. RSA-OAEP and Ed25519 studies need cryptography on both platforms.
+Missing providers fail explicitly. Metadata management, configuration and offline
+scenario composition remain available without the extra.
 
 ## Configuration and workspace
 
