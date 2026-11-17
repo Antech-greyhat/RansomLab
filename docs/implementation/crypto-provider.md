@@ -2,6 +2,34 @@
 
 Recorded: 2026-11-04. Scope: `ransomlab/crypto.py` and synthetic in-memory tests in `tests/test_crypto.py`. This is an implementation review, not an independent cryptographic audit or certification.
 
+## Phase 2 extension — 2026-11-17
+
+Phase 2 retains the CNG byte adapter and adds a hash-pinned cryptography 50.0.2
+installation for the non-Windows AES-GCM path and RSA-OAEP/Ed25519 on both platforms.
+See [dependency decisions](dependencies.md#phase-2-cryptography-dependencies--2026-11-17).
+The historical pending-provider statements below describe the November 4 review.
+
+`tests/test_crypto.py` now exercises the portable provider with AES-256-GCM known
+answers (including associated data and a partial block), empty/binary/maximum-size
+inputs, invalid lengths/types, altered tags/keys/nonces/contexts and missing
+dependencies. Windows additionally compares both providers' ciphertext and decrypts
+across providers. Native CNG ABI and cleanup fault tests remain in place.
+
+`ransomlab/research.py` supplies bounded ephemeral RSA-2048-OAEP-SHA256 key wrapping,
+Ed25519 context signatures and timed authenticated round trips. RSA wraps only a
+generated 32-byte key with the context as its OAEP label. No private study keys or
+wrapped keys are persisted. Public verification includes the RFC 8032 test-1
+Ed25519 vector, modified messages and wrong public keys; RSA tests reject modified
+wrapped keys, foreign labels and keys from another session.
+
+The shared service admits registered fixtures under the existing one-use VMware
+arming, object-identity, baseline, clean-copy, lease and resource checks. Samples
+and their events commit together. Stop/failure tests cover an uncommitted sample,
+a stop racing its transaction, key-generation deadlines, keyboard interruption,
+failed terminal writes and explicit reconciliation. Study operations leave the
+working and clean inventories unchanged. [Usage](../usage.md#cryptography-studies)
+documents reproducibility, timing scope and signature trust limitations.
+
 ## Explicit design change
 
 Phase 0 proposed the external `cryptography` package. The implemented Windows path instead calls the operating system's **Microsoft CNG AES-256-GCM** provider through Python's standard-library `ctypes`. This uses an established AES/GCM implementation; RansomLab does not implement AES, GHASH, padding or a substitute cipher. The change avoids installing an unreviewed package on Windows and must remain visible in the project decision record.

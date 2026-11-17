@@ -10,7 +10,7 @@ import sqlite3
 import sys
 import time
 
-from . import __version__, crypto, environment, scenarios
+from . import __version__, crypto, environment, research, scenarios
 from .core.config import AppConfig
 from .core.errors import DependencyError, LabError, SafetyError, StateError, ValidationError
 from .core.logging import configure_logging
@@ -57,6 +57,14 @@ def parser():
     sim = commands.add_parser("simulate", help="Run a staged fixed action on generated fixtures in an armed VM")
     sim.add_argument("lab_id")
     sim.add_argument("request_id")
+    studies = commands.add_parser("crypto", help="Bounded cryptography studies on generated fixtures").add_subparsers(dest="action", required=True)
+    study = studies.add_parser("study", help="Consume one arming and measure reversible operations in memory")
+    study.add_argument("lab_id")
+    study.add_argument("--count", type=int, default=3)
+    study.add_argument("--repetitions", type=int, default=3)
+    study.add_argument("--sizes", type=int, nargs="+", default=[], help="Up to eight increasing payload sizes in bytes; default: full fixtures")
+    history = studies.add_parser("list", help="Read persisted study results")
+    history.add_argument("lab_id")
     mon = commands.add_parser("monitor", help="Hash approved fixture inventory and correlate changes")
     mon.add_argument("lab_id")
     mon.add_argument("--watch", action="store_true")
@@ -120,6 +128,20 @@ def markdown_report(report):
             "| Sequence | UTC time | Source | Event | Outcome |", "| --- | --- | --- | --- | --- |"]
     for event in report["events"]:
         rows.append(f"| {event['sequence']} | {event['created_at']} | {event['source']} | {event['kind']} | {event['outcome']} |")
+    if report.get("crypto_studies"):
+        rows += ["", "## Cryptography studies", "",
+                 "| Study | State | Completed / planned samples | Symmetric provider |",
+                 "| --- | --- | --- | --- |"]
+        for study in report["crypto_studies"]:
+            rows.append(f"| {study['study_id']} | {study['state']} | {study['summary']['completed_samples']} / {study['configuration']['planned_samples']} | {study['providers']['symmetric']} |")
+        for study in report["crypto_studies"]:
+            rows += ["", f"### Study {study['study_id']}", "",
+                     "| Operation | Samples | Total nanoseconds | Plaintext bytes/second |",
+                     "| --- | --- | --- | --- |"]
+            for name, operation in study["summary"]["operations"].items():
+                rate = operation.get("bytes_per_second")
+                rows.append(f"| {name} | {operation['samples']} | {operation['total_ns']} | {rate if rate is not None else 'n/a'} |")
+            rows.append("")
     rows += ["", "## Recommendations", ""] + ["- " + text for text in report["recommendations"]]
     rows += ["", "## Limits", "", "Generated exercise artifacts only. Hashes require a trusted baseline and do not establish authorship."]
     return "\n".join(rows)
@@ -173,6 +195,12 @@ def main(argv=None, service=None):
                     value = service.import_scenario(_read_document(args.file))
             elif args.command == "simulate":
                 value = service.simulate(args.lab_id, args.request_id)
+            elif args.command == "crypto":
+                if args.action == "study":
+                    plan = research.StudyPlan(args.count, args.repetitions, tuple(args.sizes))
+                    value = service.crypto_study(args.lab_id, plan.count, plan.repetitions, plan.sizes)
+                else:
+                    value = service.crypto_studies(args.lab_id)
             elif args.command == "monitor":
                 if not 0.2 <= args.interval <= 60 or not 1 <= args.samples <= 150 or args.interval * args.samples > 300:
                     raise ValidationError("Monitoring must fit within 300 seconds, 150 samples and a 0.2 to 60 second interval")

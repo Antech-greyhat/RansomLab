@@ -39,11 +39,17 @@ _DETAILS_BY_KIND = {
     "scenario.imported": {"scenario", "request_id", "count", "action_count", "status", "state"},
     "containment.requested": {"reason", "state"},
     "key.created": {"operation", "state", "status"},
+    "crypto.started": {"study_id", "count", "state"},
+    "crypto.keys_ready": {"study_id", "state"},
+    "crypto.sample": {"study_id", "count", "bytes", "sha256"},
+    "crypto.completed": {"study_id", "count", "state"},
+    "crypto.contained": {"study_id", "count", "state", "reason"},
+    "crypto.interrupted": {"study_id", "count", "state", "reason"},
 }
 KINDS = frozenset(_DETAILS_BY_KIND)
 _INTEGER_DETAILS = frozenset({"count", "bytes", "changed", "missing", "verified", "failed", "action_count", "size"})
 _HASH_DETAILS = frozenset({"sha256", "baseline_sha256", "before_sha256", "after_sha256"})
-_UUID_DETAILS = frozenset({"request_id", "evidence_id"})
+_UUID_DETAILS = frozenset({"request_id", "evidence_id", "study_id"})
 
 
 def validate_id(value):

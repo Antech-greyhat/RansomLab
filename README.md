@@ -12,6 +12,7 @@ Use the command line to manage experiments and a local dashboard to explore resu
 - Create, validate, inspect, and close persistent experiment records.
 - Generate bounded synthetic datasets with SHA-256 baselines and clean recovery copies.
 - Run controlled file-modification and authenticated-encryption scenarios.
+- Measure SHA-256, AES-GCM, RSA-OAEP key wrapping and Ed25519 signatures on synthetic data.
 - Observe changed or missing files and investigate integrity alerts.
 - Preserve evidence and export incident timelines as JSON, JSONL, or Markdown.
 - Restore working files and verify their contents against the original baseline.
@@ -98,6 +99,29 @@ only stages a request and execution consumes its authorization once.
 
 These examples use Bash redirection. For Windows PowerShell 5.1, use explicit
 ASCII encoding when saving scenario JSON; see the [operator guide](docs/usage.md).
+
+## Study cryptographic behaviour
+
+Install the reviewed optional provider and prepare a generated-data lab in an
+approved disposable guest:
+
+```bash
+python -m pip install --require-hashes -r requirements-crypto.txt
+python -m pip install -e ".[crypto]"
+ransomlab lab create --name "Cryptography study" --count 3 --size 4096
+ransomlab lab arm LAB_ID --snapshot clean-baseline --isolated --disposable
+ransomlab crypto study LAB_ID --count 3 --repetitions 3 --sizes 64 1024 4096
+ransomlab crypto list LAB_ID
+ransomlab report LAB_ID --format markdown
+```
+
+Each study consumes one arming. It verifies the generated inventory and clean
+copies, performs reversible operations on memory copies, and persists verified
+samples with timings, provider versions, public signature material and baseline
+identifiers. Studies leave working files intact. Random keys/nonces and measured
+durations vary between repetitions; generated inputs and the study plan can be
+repeated. See the [study reference](docs/usage.md#cryptography-studies) for limits,
+signature verification and interrupted studies.
 
 ## Observe, investigate, and recover
 

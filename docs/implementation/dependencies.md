@@ -15,8 +15,36 @@ verification is not a complete current advisory or supply-chain audit.
 
 The test workflow uses official checkout/setup-python actions pinned to the commit
 IDs returned by their v4/v5 tag references, with read-only repository permissions
-and persisted credentials disabled. CI installs only the package and existing
-dashboard dependencies and runs synthetic tests; it does not run VM scenarios.
+and persisted credentials disabled. Phase 1 CI installed the package and existing
+dashboard dependencies; Phase 2 adds the hash-pinned crypto dependencies below.
+CI runs synthetic tests; it does not run VM scenarios.
+
+## Phase 2 cryptography dependencies — 2026-11-17
+
+The optional `crypto` extra adds cryptography 50.0.2 for portable AES-GCM and
+RSA-OAEP/Ed25519 studies on both supported platforms. Windows AES-GCM keeps the
+tested CNG implementation. The core remains standard-library only.
+
+| Package | Pin | Declared license | Source |
+| --- | --- | --- | --- |
+| cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause | [PyPI release metadata](https://pypi.org/pypi/cryptography/50.0.2/json) |
+| cffi | 2.1.1 | MIT-0 | [PyPI release metadata](https://pypi.org/pypi/cffi/2.1.1/json) |
+| pycparser | 3.12 | BSD-3-Clause | [PyPI release metadata](https://pypi.org/pypi/pycparser/3.12/json) |
+
+Official release metadata was checked on 2026-11-17 for versions, Python
+requirements, dependencies, wheel digests and PyPI vulnerability records. Each
+selected release reported an empty vulnerability list. This limited advisory
+check does not establish the absence of vulnerabilities or audit bundled native
+libraries. Redistribution must preserve package and bundled third-party notices.
+
+`requirements-crypto.txt` pins the complete CPython 3.13/3.14 crypto dependency
+set with wheel-only installation and SHA-256 hashes for Windows x64 and glibc
+Linux x86_64. Cryptography uses CPython's stable ABI; cffi wheels are specific to
+3.13/3.14, and pycparser is platform independent. Other architectures, musl,
+free-threaded Python and source builds need a separately reviewed manifest.
+CI installs this file with `--require-hashes` before the editable crypto/dashboard
+extras and runs portable provider tests on Windows and Ubuntu. The recorded local
+installation is confined to the checkout's existing `.venv`.
 
 ## Phase 0 decisions — 2026-11-11
 
